@@ -26,7 +26,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       select l.pid, l.mode, l.granted, c.relname
       from pg_locks l left join pg_class c on c.oid = l.relation
       where l.database = (select oid from pg_database where datname = current_database()) and c.relname not like 'pg_%'`;
-    let ended: unknown[] = [];
+    let ended: readonly unknown[] = [];
     if (fix) {
       ended = await sql`
         select pid, pg_terminate_backend(pid) as ended from pg_stat_activity
