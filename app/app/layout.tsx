@@ -9,18 +9,13 @@ import { Mark } from '@/components/ui';
 import { NavLinks, AutoRefresh } from '@/components/client';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 25;
 
 export default async function StaffLayout({ children }: { children: ReactNode }): Promise<ReactNode> {
-  const t0 = Date.now(); const lap = (m: string): void => console.log(`[layout] ${m} +${Date.now() - t0}ms`);
-  lap('start');
   const v = await requireStaff();
-  lap('viewer');
   const db = getDb();
   // Escalations and monthly resets also run here, at most every 5 minutes, so they happen even without a paid cron plan.
-  try { const s = await sweep(db); lap('sweep'); await deliver(s.out); } catch (e) { console.error('[sweep]', e); }
+  try { const s = await sweep(db); await deliver(s.out); } catch (e) { console.error('[sweep]', e); }
   const unread = await unreadCount(db, v);
-  lap('unread');
   const lead = isLeadRole(v.role);
   const items = [
     { href: '/app', label: v.role === 'owner' ? 'Needs attention' : 'My queue', exact: true },
