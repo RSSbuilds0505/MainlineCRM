@@ -15,7 +15,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const sql = postgres(process.env.DATABASE_URL!, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 5 });
   const started = Date.now();
   try {
-    await sql`set statement_timeout = '15s'`;
+    const before = await sql`select current_setting('statement_timeout') as statement_timeout, current_setting('lock_timeout') as lock_timeout, current_user as who, version() as v`;
     const sessions = await sql`
       select pid, usename, application_name, state, wait_event_type, wait_event,
              now() - xact_start as xact_age, now() - state_change as state_age, left(query, 160) as query
@@ -34,9 +34,9 @@ export async function POST(req: Request): Promise<NextResponse> {
           and state like 'idle in transaction%' and now() - state_change > interval '30 seconds'`;
     }
     const settings = await sql`select name, setting from pg_settings where name in ('idle_in_transaction_session_timeout','statement_timeout','lock_timeout')`;
-    return NextResponse.json({ ms: Date.now() - started, sessions, locks, ended, settings });
+    return NextResponse.json({ ms: Date.now() - started, before, sessions, locks, ended, settings });
   } catch (e) {
-    return NextResponse.json({ ms: Date.now() - started, error: String(e) }, { status: 500 });
+    return NextResponse.json({ ms: Date.now() - started, error: String(e), where: (e as { query?: string }).query?.slice(0, 80) }, { status: 500 });
   } finally {
     await sql.end({ timeout: 2 }).catch(() => undefined);
   }
