@@ -15,7 +15,14 @@ export function getDb(): DB {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is not set');
   // prepare:false is required by the Supabase transaction pooler.
-  const sql = postgres(url, { prepare: false, max: Number(process.env.DB_POOL_MAX ?? 5) });
+  // Short idle and lifetime limits so a serverless instance never reuses a socket the pooler has already dropped.
+  const sql = postgres(url, {
+    prepare: false,
+    max: Number(process.env.DB_POOL_MAX ?? 5),
+    connect_timeout: 10,
+    idle_timeout: 20,
+    max_lifetime: 60 * 5,
+  });
   g.__mainlineSql = sql;
   g.__mainlineDb = drizzle(sql, { schema }) as unknown as DB;
   return g.__mainlineDb;
