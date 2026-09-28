@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 /**
  * Database health check, protected by CRON_SECRET. Uses its own short-lived connection so it still
  * answers when the app's shared connection is stuck. POST with ?fix=1 also ends sessions that have
- * sat idle inside an open transaction for more than 30 seconds (they hold locks and stall the app).
+ * sat idle inside an open transaction, or stalled waiting on the client, for more than 60 seconds (they hold locks and stall the app).
  */
 export async function POST(req: Request): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
@@ -31,7 +31,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       ended = await sql`
         select pid, pg_terminate_backend(pid) as ended from pg_stat_activity
         where datname = current_database() and pid <> pg_backend_pid() and usename = current_user
-          and state like 'idle in transaction%' and now() - state_change > interval '30 seconds'`;
+          and now() - state_change > interval '60 seconds'
+          and (state like 'idle in transaction%' or (state = 'active' and wait_event = 'ClientRead'))`;
     }
     const settings = await sql`select name, setting from pg_settings where name in ('idle_in_transaction_session_timeout','statement_timeout','lock_timeout')`;
     return NextResponse.json({ ms: Date.now() - started, before, sessions, locks, ended, settings });
