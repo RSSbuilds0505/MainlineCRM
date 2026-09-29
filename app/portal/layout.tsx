@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { eq } from 'drizzle-orm';
-import { requireClient } from '@/lib/auth';
+import { hasPassword, requireClient } from '@/lib/auth';
+import { PasswordNudge } from '@/components/account';
 import { getDb } from '@/lib/db';
 import { orgs } from '@/lib/db/schema';
 import { unreadCount } from '@/lib/queries';
@@ -12,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export default async function PortalLayout({ children }: { children: ReactNode }): Promise<ReactNode> {
   const v = await requireClient();
   const db = getDb();
-  const [[org], unread] = await Promise.all([db.select().from(orgs).where(eq(orgs.id, v.orgId ?? '00000000-0000-0000-0000-000000000000')), unreadCount(db, v)]);
+  const [[org], unread, pw] = await Promise.all([db.select().from(orgs).where(eq(orgs.id, v.orgId ?? '00000000-0000-0000-0000-000000000000')), unreadCount(db, v), hasPassword()]);
   if (!org || !org.active) {
     return (
       <main className="login"><div className="panel stack"><Mark /><h1 style={{ fontSize: 26 }}>Your account is paused</h1><p style={{ margin: 0 }}>Contact your Mainline team to reactivate access.</p>
@@ -30,9 +31,9 @@ export default async function PortalLayout({ children }: { children: ReactNode }
             <form action="/auth/signout" method="post"><button className="btn ghost sm" type="submit">Sign out</button></form>
           </div>
         </div>
-        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: 'New request' }, { href: '/portal/services', label: 'Services' }]} />
+        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: 'New request' }, { href: '/portal/services', label: 'Services' }, { href: '/portal/account', label: 'Account' }]} />
       </header>
-      <main>{children}</main>
+      <main>{pw ? null : <PasswordNudge href="/portal/account" />}{children}</main>
       <AutoRefresh seconds={60} />
     </>
   );

@@ -14,7 +14,7 @@ import { llmEnabled } from '@/lib/llm';
 import { savePerson, signInLink } from '@/lib/people';
 import { sendEmail, emailEnabled } from '@/lib/email';
 import { supabaseServer } from '@/lib/supabase/server';
-import { isLeadRole, isStaffRole, PLATFORMS } from '@/lib/core';
+import { isLeadRole, isStaffRole, MIN_PASSWORD, PLATFORMS } from '@/lib/core';
 import * as wf from '@/lib/workflow';
 
 const s = (fd: FormData, k: string): string => String(fd.get(k) ?? '').trim();
@@ -78,6 +78,45 @@ export async function requestLink(fd: FormData): Promise<never> {
     console.error('[login] link failed', e);
   }
   redirect(done);
+}
+
+export async function signInPassword(fd: FormData): Promise<never> {
+  const email = s(fd, 'email').toLowerCase();
+  const password = String(fd.get('password') ?? '');
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || !password) redirect('/login?e=bad');
+  const db = getDb();
+  const ip = (headers().get('x-forwarded-for') ?? 'unknown').split(',')[0].trim();
+  const [byEmail, byIp] = await Promise.all([allow(db, `pw:${email}`, 10, 900), allow(db, `pwip:${ip}`, 40, 900)]);
+  if (!byEmail.ok || !byIp.ok) redirect(`/login?e=rate&retry=${Math.ceil(Math.max(byEmail.retryAfter, byIp.retryAfter) / 60)}`);
+  const { error } = await supabaseServer().auth.signInWithPassword({ email, password });
+  // One message for every failure so the form never reveals which emails have accounts.
+  if (error) redirect('/login?e=bad');
+  redirect('/');
+}
+
+export async function setPasswordAction(fd: FormData): Promise<never> {
+  const v = await requireViewer();
+  const back = v.role === 'client' ? '/portal/account' : '/app/account';
+  const password = String(fd.get('password') ?? '');
+  const confirm = String(fd.get('confirm') ?? '');
+  let err: string | null = null;
+  if (password.length < MIN_PASSWORD) err = `Use at least ${MIN_PASSWORD} characters.`;
+  else if (password !== confirm) err = 'The two passwords do not match.';
+  else if (password.toLowerCase().includes(v.email.split('@')[0].toLowerCase())) err = 'Choose a password that does not contain your email name.';
+  if (!err) {
+    const lim = await allow(getDb(), `setpw:${v.id}`, 10, 3600);
+    if (!lim.ok) err = 'Too many attempts. Try again later.';
+    else {
+      const { error } = await supabaseServer().auth.updateUser({ password, data: { password_set: true } });
+      if (error) {
+        console.error('[account] password update failed', error.message);
+        err = /same/i.test(error.message) ? 'That is already your password.'
+          : /weak|pwned|leaked/i.test(error.message) ? 'That password is too easy to guess. Try a longer one.'
+          : 'Could not save the password. Try again.';
+      }
+    }
+  }
+  redirect(withFlash(back, err ? { err } : { ok: 'Password saved. Next time, sign in with your email and this password.' }));
 }
 
 /* ---------------- requests ---------------- */

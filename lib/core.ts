@@ -37,6 +37,9 @@ export const PRI: Record<Priority, { label: string; firstResponse: number; mult:
 export const ROLE_LBL: Record<Role, string> = {
   owner: 'Owner', lead: 'Solutions Lead', csm: 'CSM', implementer: 'Implementer', client: 'Client',
 };
+/** Minimum length for account passwords. */
+export const MIN_PASSWORD = 10;
+
 export const PLATFORMS = ['HubSpot', 'Salesforce', 'Monday', 'GoHighLevel'] as const;
 export const SOURCES = ['Email', 'Phone call', 'Slack', 'Meeting', 'Text message', 'Other'] as const;
 

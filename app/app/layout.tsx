@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { requireStaff } from '@/lib/auth';
+import { hasPassword, requireStaff } from '@/lib/auth';
+import { PasswordNudge } from '@/components/account';
 import { getDb } from '@/lib/db';
 import { unreadCount } from '@/lib/queries';
 import { sweep } from '@/lib/workflow';
@@ -15,7 +16,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
   const db = getDb();
   // Escalations and monthly resets also run here, at most every 5 minutes, so they happen even without a paid cron plan.
   try { const s = await sweep(db); await deliver(s.out); } catch (e) { console.error('[sweep]', e); }
-  const unread = await unreadCount(db, v);
+  const [unread, pw] = await Promise.all([unreadCount(db, v), hasPassword()]);
   const lead = isLeadRole(v.role);
   const items = [
     { href: '/app', label: v.role === 'owner' ? 'Needs attention' : 'My queue', exact: true },
@@ -25,6 +26,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
     { href: '/app/time', label: lead ? 'Time' : 'My time' },
     { href: '/app/clients', label: 'Clients' },
     ...(lead ? [{ href: '/app/dashboard', label: 'Dashboard' }, { href: '/app/setup', label: 'Setup' }] : []),
+    { href: '/app/account', label: 'Account' },
   ];
   return (
     <>
@@ -39,7 +41,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
         </div>
         <NavLinks items={items} />
       </header>
-      <main>{children}</main>
+      <main>{pw ? null : <PasswordNudge href="/app/account" />}{children}</main>
       <AutoRefresh seconds={45} />
     </>
   );
