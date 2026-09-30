@@ -41,7 +41,7 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
           <div className="panel"><h3>Credits</h3>
             <p style={{ margin: '8px 0 6px' }}><strong style={{ fontSize: 20 }}>{org.credits}</strong> <span className="muted">of {org.monthlyCredits} left this month</span></p>
             <div className={`meter ${pct < 20 ? 'hot' : pct < 40 ? 'warm' : ''}`}><i style={{ width: `${pct}%` }} /></div>
-            <p className="small muted" style={{ margin: '8px 0 0' }}>Credits are used when your team confirms a request&apos;s scope, and refill on the 1st.</p>
+            <p className="small muted" style={{ margin: '8px 0 0' }}>Credits are used when your team confirms a request&apos;s scope, and refill on the 1st. <Link href="/portal/services">See what credits buy</Link></p>
           </div>
           <div className="panel"><h3>Need help?</h3>
             <p className="small" style={{ margin: '8px 0 10px' }}>Something broken, data looking wrong, or a quick question? Open a support ticket. It goes straight to your implementer and never uses credits.</p>
@@ -49,8 +49,8 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
           </div>
           <div className="panel"><h3>Your team</h3>
             <div className="team" style={{ marginTop: 10 }}>
-              {csm ? <div className="person"><span className="av">{initials(csm.name)}</span><div><strong>{csm.name}</strong><div className="small muted">Customer success manager</div></div></div> : null}
-              {team.filter((p) => p.role === 'implementer').map((p) => <div key={p.id} className="person"><span className="av">{initials(p.name)}</span><div><strong>{p.name}</strong><div className="small muted">{p.platforms.join(', ')} specialist</div></div></div>)}
+              {csm ? <div className="person"><span className="av">{initials(csm.name)}</span><div><strong>{csm.name}</strong><div className="small muted">Customer success manager · <a href={`mailto:${csm.email}`}>Email</a></div></div></div> : null}
+              {team.filter((p) => p.role === 'implementer').map((p) => <div key={p.id} className="person"><span className="av">{initials(p.name)}</span><div><strong>{p.name}</strong><div className="small muted">{p.platforms.join(', ')} specialist · <a href={`mailto:${p.email}`}>Email</a></div></div></div>)}
               {!csm && !team.length ? <p className="muted small">Your team is being assigned.</p> : null}
             </div>
           </div>

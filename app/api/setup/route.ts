@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db';
 import { applyMigrations, ensureOwner, seedBasics } from '@/lib/setup';
 import { supabaseAdmin } from '@/lib/supabase/server';
 import { signInLink } from '@/lib/people';
+import { store } from '@/lib/storage';
 
 /**
  * One-time setup, protected by CRON_SECRET. Creates tables, seeds the catalog, creates the owner
@@ -14,6 +15,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   const db = getDb();
   const applied = await applyMigrations(db);
   await seedBasics(db);
+  let storage = 'ready';
+  try { await store().ensureBucket(); } catch (e) { storage = `not ready: ${e instanceof Error ? e.message : String(e)}`; }
   const email = (process.env.OWNER_EMAIL ?? '').trim().toLowerCase();
   let owner = 'skipped (OWNER_EMAIL not set)';
   let link: string | null = null;
@@ -29,5 +32,5 @@ export async function POST(req: Request): Promise<NextResponse> {
     owner = (await ensureOwner(db, id, email, process.env.OWNER_NAME || 'Owner')) ? 'created' : 'already existed';
     link = await signInLink(email);
   }
-  return NextResponse.json({ applied, owner, signInLink: link });
+  return NextResponse.json({ applied, owner, storage, signInLink: link });
 }

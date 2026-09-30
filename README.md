@@ -30,6 +30,16 @@ Tickets are separate from service requests:
 
 Under the hood a ticket is a request on the built-in `support` service (hidden from the catalog) with a `category`.
 
+## Screenshots, files and videos
+
+Clients and the team can attach files to any request or support ticket: click to choose, drag and drop, or paste a screenshot anywhere on the page (Ctrl+V / Cmd+V). The new-request and support forms accept attachments and a Loom link too.
+
+- Files go to a **private** Supabase Storage bucket named `attachments` (created by `/api/setup`). The browser uploads straight to storage with a one-time signed token, so large files never pass through Vercel. Pages show files through signed links that expire after an hour.
+- Allowed: PNG, JPG, GIF, WebP, HEIC, MP4, MOV, WebM, PDF, TXT, CSV and Office files, up to 50 MB each (the Supabase free-plan limit). The server re-checks the stored file's real type and size before recording it.
+- Loom, YouTube and Vimeo links play inline. Other links (Google Drive and so on) show as link cards.
+- Staff can mark an attachment **Internal only**; clients never see those (enforced in code and by Row Level Security).
+- The person who added an attachment, or a lead, can remove it.
+
 ## Environment variables
 
 See `.env.example`. Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` (Supabase transaction pooler URI), `APP_URL`, `OWNER_EMAIL`, `OWNER_NAME`, `CRON_SECRET`.

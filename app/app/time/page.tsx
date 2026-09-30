@@ -56,8 +56,8 @@ export default async function Time({ searchParams }: { searchParams: Record<stri
       <div className="stack">
         {lead ? (
           <div className="grid2 even">
-            <section className="panel"><h2>By person</h2><div className="tw"><table><tbody>{sum((r) => r.staffId).map(([id, h]) => <tr key={id}><td>{L.people.get(id)?.name}</td><td className="num">{hrs(h)}h</td></tr>)}</tbody></table></div></section>
-            <section className="panel"><h2>By client</h2><div className="tw"><table><tbody>{sum((r) => r.orgId).map(([id, h]) => <tr key={id}><td>{L.orgs.get(id)?.name}</td><td className="num">{hrs(h)}h</td></tr>)}</tbody></table></div></section>
+            <section className="panel"><h2>By person</h2><div className="tw"><table><tbody>{sum((r) => r.staffId).map(([id, h]) => <tr key={id}><td><Link href={`/app/board?who=${id}`}>{L.people.get(id)?.name}</Link></td><td className="num">{hrs(h)}h</td></tr>)}</tbody></table></div></section>
+            <section className="panel"><h2>By client</h2><div className="tw"><table><tbody>{sum((r) => r.orgId).map(([id, h]) => <tr key={id}><td><Link href={`/app/clients/${id}`}>{L.orgs.get(id)?.name}</Link></td><td className="num">{hrs(h)}h</td></tr>)}</tbody></table></div></section>
           </div>
         ) : null}
         <section className="panel">
@@ -67,7 +67,7 @@ export default async function Time({ searchParams }: { searchParams: Record<stri
             <tbody>
               {rows.map((t) => (
                 <tr key={t.id}>
-                  <td>{fmtDay(t.workDate)}</td>{lead ? <td>{L.people.get(t.staffId)?.name}</td> : null}<td>{L.orgs.get(t.orgId)?.name}</td>
+                  <td>{fmtDay(t.workDate)}</td>{lead ? <td><Link href={`/app/board?who=${t.staffId}`}>{L.people.get(t.staffId)?.name}</Link></td> : null}<td><Link href={`/app/clients/${t.orgId}`}>{L.orgs.get(t.orgId)?.name}</Link></td>
                   <td><Link href={`/app/requests/${t.requestId}`}>{L.skus.get(t.skuId)?.name ?? 'Request'}</Link></td>
                   <td className="num">{hrs(Number(t.hours))}</td><td className="small">{t.note}</td>
                   <td>{t.staffId === v.id || lead ? <form action={deleteTimeAction}><input type="hidden" name="timelogId" value={t.id} /><input type="hidden" name="back" value="/app/time" /><Submit className="btn ghost sm" confirmText="Delete this time entry?">Delete</Submit></form> : null}</td>

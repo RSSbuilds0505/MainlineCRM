@@ -74,7 +74,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
         </div>
         <div className="tw"><table>
           <thead><tr><th>Client</th><th className="num">Price</th><th className="num">Hours</th><th className="num">Labor</th><th className="num">Margin</th></tr></thead>
-          <tbody>{rows.map((x) => <tr key={x.o.id}><td>{x.o.name}</td><td className="num">{x.price ? money(x.price) : 'Not set'}</td><td className="num">{hrs(x.h)}</td><td className="num">{money(x.cost)}</td><td className={`num ${gmCls(x.gm)}`}>{x.gm == null ? '' : `${Math.round(x.gm * 100)}%`}</td></tr>)}</tbody>
+          <tbody>{rows.map((x) => <tr key={x.o.id}><td><Link href={`/app/clients/${x.o.id}`}>{x.o.name}</Link></td><td className="num">{x.price ? money(x.price) : 'Not set'}</td><td className="num">{hrs(x.h)}</td><td className="num">{money(x.cost)}</td><td className={`num ${gmCls(x.gm)}`}>{x.gm == null ? '' : `${Math.round(x.gm * 100)}%`}</td></tr>)}</tbody>
         </table></div>
         <h3>Service estimates vs actual</h3>
         <div className="tw"><table>
@@ -93,15 +93,15 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
       <Head title="Dashboard" sub="The whole line at a glance. Level 3 escalations are the only items meant for the owner." />
       <div className="stack">
         <div className="kpis">
-          <div className="kpi"><b>{open.length}</b><span>Open requests</span></div>
+          <Link className="kpi link" href="/app/board"><b>{open.length}</b><span>Open requests</span></Link>
           <div className="kpi"><b>{pct(hit, finished.length)}</b><span>SLA hit rate</span></div>
-          <div className="kpi"><b>{lv(1)}</b><span>At risk</span></div>
-          <div className="kpi"><b>{lv(2)}</b><span>Breached</span></div>
-          <div className="kpi"><b style={{ color: lv(3) ? 'var(--stop)' : 'inherit' }}>{lv(3)}</b><span>Need the owner</span></div>
+          <Link className="kpi link" href="/app/board?risk=1"><b>{lv(1)}</b><span>At risk</span></Link>
+          <Link className="kpi link" href="/app/board?risk=2"><b>{lv(2)}</b><span>Breached</span></Link>
+          <Link className="kpi link" href="/app/board?risk=3"><b style={{ color: lv(3) ? 'var(--stop)' : 'inherit' }}>{lv(3)}</b><span>Need the owner</span></Link>
           <div className="kpi"><b>{pct(fp, finished.length)}</b><span>First-pass QA</span></div>
-          <div className="kpi"><b>{used}</b><span>Credits used this month</span></div>
-          <div className="kpi"><b>{portalShare}</b><span>Submitted by clients</span></div>
-          <div className="kpi"><b>{open.filter(isSupport).length}</b><span>Open support tickets</span></div>
+          <Link className="kpi link" href="/app/clients"><b>{used}</b><span>Credits used this month</span></Link>
+          <Link className="kpi link" href="/app/board?src=portal"><b>{portalShare}</b><span>Submitted by clients</span></Link>
+          <Link className="kpi link" href="/app/board?kind=support"><b>{open.filter(isSupport).length}</b><span>Open support tickets</span></Link>
         </div>
         <div className="grid2 even">
           <section className="panel"><h2>Team load</h2><div className="stack">
@@ -109,7 +109,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
               const u = (openRec[p.id] ?? 0) / (p.capacity || 30);
               return (
                 <div key={p.id}>
-                  <div className="row" style={{ justifyContent: 'space-between' }}><strong>{p.name}</strong><span className="small muted">{Math.round(openRec[p.id] ?? 0)}h open of {p.capacity}h</span></div>
+                  <div className="row" style={{ justifyContent: 'space-between' }}><Link href={`/app/board?who=${p.id}`}><strong>{p.name}</strong></Link><span className="small muted">{Math.round(openRec[p.id] ?? 0)}h open of {p.capacity}h</span></div>
                   <div className={`meter ${u > 0.9 ? 'hot' : u > 0.7 ? 'warm' : ''}`}><i style={{ width: `${Math.min(100, u * 100)}%` }} /></div>
                 </div>
               );

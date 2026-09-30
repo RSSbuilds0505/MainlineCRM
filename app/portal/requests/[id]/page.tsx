@@ -6,9 +6,10 @@ import { requireClient } from '@/lib/auth';
 import { lookups, requestDetail } from '@/lib/queries';
 import { allowed } from '@/lib/workflow';
 import { PRI, clientStatus, isSupport, supportCategoryLabel } from '@/lib/core';
-import { ClientLine, Flash, fmtWhen } from '@/components/ui';
+import { ClientLine, Flash, Linkify, fmtWhen } from '@/components/ui';
 import { Submit } from '@/components/client';
 import * as A from '@/app/actions';
+import { AttachmentsPanel } from '@/components/attachments';
 
 export default async function PortalRequest({ params, searchParams }: { params: { id: string }; searchParams: Record<string, string | undefined> }): Promise<ReactNode> {
   const v = await requireClient();
@@ -37,7 +38,7 @@ export default async function PortalRequest({ params, searchParams }: { params: 
           {r.status === 'waiting' ? (
             <section className="panel stack" style={{ borderColor: 'var(--signal-fill)' }}>
               <h2 style={{ margin: 0 }}>Your team needs a reply</h2>
-              {lastQuestion ? <div className="msg"><div className="by">{lastQuestion.authorName}, {fmtWhen(lastQuestion.at)}</div><p>{lastQuestion.body}</p></div> : null}
+              {lastQuestion ? <div className="msg"><div className="by">{lastQuestion.authorName}, {fmtWhen(lastQuestion.at)}</div><p><Linkify text={lastQuestion.body} /></p></div> : null}
               <form action={A.commentAction} className="form">
                 {hidden}
                 <label className="f">Your answer<textarea name="body" required /></label>
@@ -61,14 +62,15 @@ export default async function PortalRequest({ params, searchParams }: { params: 
             </section>
           ) : null}
           <section className="panel stack"><h2>Details</h2>
-            <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description || 'No description provided.'}</p>
+            <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description ? <Linkify text={r.description} /> : 'No description provided.'}</p>
             {r.ai?.summary ? <div className="ai"><strong>Scope summary</strong><p style={{ margin: '4px 0 0' }}>{r.ai.summary}</p></div> : null}
           </section>
+          <AttachmentsPanel items={d.attachments} v={v} requestId={r.id} back={back} canAdd={can('comment')} />
           <section className="panel stack">
             <h2>Conversation</h2>
             <div className="thread">
               {d.comments.map((c) => (
-                <div key={c.id} className={`msg${c.fromClient ? ' client' : ''}`}><div className="by">{c.authorName}, {fmtWhen(c.at)}</div><p>{c.body}</p></div>
+                <div key={c.id} className={`msg${c.fromClient ? ' client' : ''}`}><div className="by">{c.authorName}, {fmtWhen(c.at)}</div><p><Linkify text={c.body} /></p></div>
               ))}
               {!d.comments.length ? <p className="muted" style={{ margin: 0 }}>No messages yet. Your team will post updates here.</p> : null}
             </div>

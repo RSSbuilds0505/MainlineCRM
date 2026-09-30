@@ -11,5 +11,9 @@ export const MIGRATIONS: { name: string; sql: string }[] = [
   {
     "name": "0002_support_tickets",
     "sql": "ALTER TABLE \"requests\" ADD COLUMN \"category\" text;"
+  },
+  {
+    "name": "0003_attachments",
+    "sql": "CREATE TABLE \"attachments\" (\n\t\"id\" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,\n\t\"request_id\" uuid NOT NULL,\n\t\"kind\" text NOT NULL,\n\t\"name\" text NOT NULL,\n\t\"mime\" text,\n\t\"size\" integer,\n\t\"path\" text,\n\t\"url\" text,\n\t\"internal\" boolean DEFAULT false NOT NULL,\n\t\"from_client\" boolean DEFAULT false NOT NULL,\n\t\"uploaded_by\" uuid,\n\t\"uploaded_by_name\" text NOT NULL,\n\t\"at\" timestamp with time zone DEFAULT now() NOT NULL\n);\n--> statement-breakpoint\nCREATE INDEX \"attachments_request_idx\" ON \"attachments\" USING btree (\"request_id\");--> statement-breakpoint\n-- Row Level Security: clients read their own company's non-internal attachments; staff read all; nobody writes directly.\nALTER TABLE public.attachments ENABLE ROW LEVEL SECURITY;--> statement-breakpoint\nREVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.attachments FROM anon, authenticated;--> statement-breakpoint\nREVOKE ALL ON public.attachments FROM anon;--> statement-breakpoint\nGRANT SELECT ON public.attachments TO authenticated;--> statement-breakpoint\nCREATE POLICY attachments_read ON public.attachments FOR SELECT TO authenticated\n  USING (\n    public.viewer_is_staff()\n    OR (NOT internal AND EXISTS (\n      SELECT 1 FROM public.requests r WHERE r.id = request_id AND r.org_id = public.viewer_org()\n    ))\n  );\n"
   }
 ];

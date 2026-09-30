@@ -119,6 +119,24 @@ export const comments = pgTable('comments', {
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({ byReq: index('comments_request_idx').on(t.requestId) }));
 
+/** Screenshots, files and video links on a request. Files live in private storage; access is by short-lived signed link. */
+export const attachments = pgTable('attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  requestId: uuid('request_id').notNull(),
+  /** 'file' (stored upload) or 'link' (Loom, YouTube, Drive and so on). */
+  kind: text('kind').notNull(),
+  name: text('name').notNull(),
+  mime: text('mime'),
+  size: integer('size'),
+  path: text('path'),
+  url: text('url'),
+  internal: boolean('internal').notNull().default(false),
+  fromClient: boolean('from_client').notNull().default(false),
+  uploadedBy: uuid('uploaded_by'),
+  uploadedByName: text('uploaded_by_name').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({ byReq: index('attachments_request_idx').on(t.requestId) }));
+
 export const timelogs = pgTable('timelogs', {
   id: uuid('id').primaryKey().defaultRandom(),
   requestId: uuid('request_id').notNull(),
@@ -199,3 +217,4 @@ export type Settings = typeof settings.$inferSelect;
 export type Role = Profile['role'];
 export type Status = Request['status'];
 export type Priority = Request['priority'];
+export type Attachment = typeof attachments.$inferSelect;

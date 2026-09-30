@@ -77,7 +77,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
             <thead><tr><th>Name</th><th>Role</th><th>Pod</th><th>Platforms</th><th className="num">Capacity</th>{owner ? <th className="num">Pay rate</th> : null}<th /></tr></thead>
             <tbody>{staff.map((p) => (
               <tr key={p.id} className={p.active ? '' : 'muted'}>
-                <td>{p.name}{p.active ? '' : ' (inactive)'}<div className="small muted">{p.email}</div></td><td>{ROLE_LBL[p.role]}</td>
+                <td><Link href={`${BACK}?edit=staff:${p.id}#edit`}>{p.name}</Link>{p.active ? '' : ' (inactive)'}<div className="small muted"><a href={`mailto:${p.email}`}>{p.email}</a></div></td><td>{ROLE_LBL[p.role]}</td>
                 <td>{L.pods.get(p.podId ?? '')?.name ?? 'All'}</td><td>{p.platforms.join(', ')}</td><td className="num">{p.capacity}h</td>
                 {owner ? <td className="num">{fin?.rates.has(p.id) ? `$${fin.rates.get(p.id)}` : 'Not set'}</td> : null}
                 <td><div className="row" style={{ flexWrap: 'nowrap' }}>{eb('staff', p.id)}{p.active ? linkBtn(p) : null}</div></td>
@@ -113,7 +113,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
             <thead><tr><th>Client</th><th>Platform</th><th>Pod</th><th>Plan</th>{owner ? <th className="num">Price</th> : null}<th className="num">Credits</th><th /></tr></thead>
             <tbody>{orgList.map((o) => (
               <tr key={o.id} className={o.active ? '' : 'muted'}>
-                <td>{o.name}{o.active ? '' : ' (inactive)'}</td><td>{o.platform}</td><td>{L.pods.get(o.podId ?? '')?.name ?? 'None'}</td><td>{o.plan}</td>
+                <td><Link href={`/app/clients/${o.id}`}>{o.name}</Link>{o.active ? '' : ' (inactive)'}</td><td>{o.platform}</td><td>{L.pods.get(o.podId ?? '')?.name ?? 'None'}</td><td>{o.plan}</td>
                 {owner ? <td className="num">{fin?.prices.get(o.id) ? money(Number(fin.prices.get(o.id))) : 'Not set'}</td> : null}
                 <td className="num">{o.credits} / {o.monthlyCredits}</td>
                 <td><div className="row" style={{ flexWrap: 'nowrap' }}>{eb('org', o.id)}<form action={A.resetCreditsAction} className="inline"><input type="hidden" name="orgId" value={o.id} />{hb}<Submit className="btn ghost sm" confirmText={`Reset ${o.name} to ${o.monthlyCredits} credits?`}>Reset credits</Submit></form></div></td>
@@ -131,7 +131,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
             <tbody>
               {contacts.map((p) => (
                 <tr key={p.id} className={p.active ? '' : 'muted'}>
-                  <td>{p.name}{p.active ? '' : ' (inactive)'}</td><td>{p.email}</td><td>{L.orgs.get(p.orgId ?? '')?.name}</td>
+                  <td><Link href={`${BACK}?edit=contact:${p.id}#edit`}>{p.name}</Link>{p.active ? '' : ' (inactive)'}</td><td><a href={`mailto:${p.email}`}>{p.email}</a></td><td>{p.orgId ? <Link href={`/app/clients/${p.orgId}`}>{L.orgs.get(p.orgId)?.name}</Link> : null}</td>
                   <td><div className="row" style={{ flexWrap: 'nowrap' }}>{eb('contact', p.id)}{p.active ? linkBtn(p) : null}</div></td>
                 </tr>
               ))}
@@ -155,7 +155,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
           <div className="tw"><table>
             <thead><tr><th>Pod</th><th>CSM</th><th className="num">Clients</th><th>Implementers</th><th /></tr></thead>
             <tbody>{[...L.pods.values()].map((x) => (
-              <tr key={x.id}><td>{x.name}</td><td>{L.people.get(x.csmId ?? '')?.name ?? 'Unassigned'}</td><td className="num">{orgList.filter((o) => o.podId === x.id && o.active).length}</td>
+              <tr key={x.id}><td><Link href={`${BACK}?edit=pod:${x.id}#edit`}>{x.name}</Link></td><td>{L.people.get(x.csmId ?? '')?.name ?? 'Unassigned'}</td><td className="num">{orgList.filter((o) => o.podId === x.id && o.active).length}</td>
                 <td>{staff.filter((p) => p.podId === x.id && p.role === 'implementer' && p.active).map((p) => p.name).join(', ') || 'None'}</td><td>{eb('pod', x.id)}</td></tr>
             ))}</tbody>
           </table></div>
@@ -185,7 +185,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
           <div className="tw"><table>
             <thead><tr><th>Service</th><th>Platform</th><th className="num">Credits</th><th className="num">Est. hours</th><th className="num">SLA</th><th className="num">QA items</th><th /></tr></thead>
             <tbody>{[...L.skus.values()].filter(isCatalogSku).map((k) => (
-              <tr key={k.id} className={k.active ? '' : 'muted'}><td><strong>{k.name}</strong>{k.active ? '' : ' (off)'}<div className="small muted">{k.category}</div></td><td>{k.platform}</td>
+              <tr key={k.id} className={k.active ? '' : 'muted'}><td><Link href={`${BACK}?edit=sku:${k.id}#edit`}><strong>{k.name}</strong></Link>{k.active ? '' : ' (off)'}<div className="small muted">{k.category}</div></td><td>{k.platform}</td>
                 <td className="num">{k.credits}</td><td className="num">{k.estHours}</td><td className="num">{k.slaHours}h</td><td className="num">{k.qa.length}</td><td>{eb('sku', k.id)}</td></tr>
             ))}</tbody>
           </table></div>

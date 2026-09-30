@@ -16,6 +16,7 @@ import { sendEmail, emailEnabled } from '@/lib/email';
 import { supabaseServer } from '@/lib/supabase/server';
 import { isLeadRole, isStaffRole, MIN_PASSWORD, PLATFORMS } from '@/lib/core';
 import * as wf from '@/lib/workflow';
+import { store } from '@/lib/storage';
 
 const s = (fd: FormData, k: string): string => String(fd.get(k) ?? '').trim();
 const n = (fd: FormData, k: string, d = 0): number => { const v = Number(fd.get(k)); return Number.isFinite(v) && fd.get(k) !== '' && fd.get(k) !== null ? v : d; };
@@ -138,6 +139,7 @@ export async function createRequestAction(fd: FormData): Promise<never> {
         if (ai) await db.update(requests).set({ ai }).where(eq(requests.id, res.value));
       }
     }
+    await attachFromForm(db, v, res.value, fd);
     return res;
   }, 'Request submitted.', (id) => (typeof id === 'string' ? `${isClientPath(back) ? '/portal' : '/app'}/requests/${id}` : undefined));
 }
@@ -188,15 +190,43 @@ export async function supportTicketAction(fd: FormData): Promise<never> {
     // Rate limit so a stuck form or script cannot flood the team.
     const lim = await allow(db, `ticket:${v.id}`, 20, 3600);
     if (!lim.ok) throw new wf.UserError('You have opened a lot of tickets in the last hour. Add details to an existing ticket, or try again later.');
-    return wf.createSupportTicket(db, v, {
+    const res = await wf.createSupportTicket(db, v, {
       orgId: v.role === 'client' ? v.orgId ?? '' : s(fd, 'orgId'), category: s(fd, 'category'), title: s(fd, 'title'),
       description: s(fd, 'description'), priority: (s(fd, 'priority') || 'normal') as Priority, contact: s(fd, 'contact'),
     });
+    await attachFromForm(db, v, res.value, fd);
+    return res;
   }, 'Support ticket opened. Your team has been notified.', (id) => (typeof id === 'string' ? `${isClientPath(back) ? '/portal' : '/app'}/requests/${id}` : undefined));
 }
 export async function resolveAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.resolveTicket(db, v, s(fd, 'id'), s(fd, 'body')), 'Marked resolved. The client has been asked to confirm.');
 }
+export async function addLinkAction(fd: FormData): Promise<never> {
+  return run(safeBack(fd, '/'), (db, v) => wf.addLink(db, v, s(fd, 'id'), s(fd, 'url'), b(fd, 'internal')), 'Link attached.');
+}
+export async function removeAttachmentAction(fd: FormData): Promise<never> {
+  return run(safeBack(fd, '/'), async (db, v) => {
+    const res = await wf.removeAttachment(db, v, s(fd, 'attachmentId'));
+    if (res.value) await store().remove([res.value]).catch((e) => console.error('[attachments] storage delete failed', e));
+    return res;
+  }, 'Attachment removed.');
+}
+/** Files uploaded on a create form arrive as JSON in hidden "file" fields; video links in "videoUrl". */
+function draftFiles(fd: FormData): wf.FileRef[] {
+  return fd.getAll('file').slice(0, 20).flatMap((x) => {
+    try { const o = JSON.parse(String(x)) as { path?: string; name?: string }; return o.path ? [{ path: String(o.path), name: String(o.name ?? '') }] : []; } catch { return []; }
+  });
+}
+async function attachFromForm(db: DB, v: wf.Viewer, id: string, fd: FormData): Promise<void> {
+  try {
+    const res = await wf.attachToNew(db, v, id, draftFiles(fd), fd.getAll('videoUrl').map(String));
+    await deliver(res.out);
+  } catch (e) {
+    // The request is already saved; a bad attachment should not lose it.
+    console.error('[attachments] could not attach from the form', e);
+  }
+}
+
 export async function submitQaAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.submitQa(db, v, s(fd, 'id')), 'Sent to QA.');
 }

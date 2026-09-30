@@ -8,9 +8,10 @@ import { allowed, openHoursByStaff } from '@/lib/workflow';
 import { LBL, PRI, SUPPORT_LBL, TZ, clockWord, isCatalogSku, isLeadRole, isSupport, sla, slaHoursFor, supportCategoryLabel } from '@/lib/core';
 import { llmEnabled } from '@/lib/llm';
 import type { Profile } from '@/lib/db/schema';
-import { Flash, Line, SlaChip, fmtDay, fmtWhen, hrs } from '@/components/ui';
+import { Flash, Line, Linkify, SlaChip, fmtDay, fmtWhen, hrs } from '@/components/ui';
 import { Submit, Timer } from '@/components/client';
 import * as A from '@/app/actions';
+import { AttachmentsPanel } from '@/components/attachments';
 
 function load(p: Profile, open: number): string {
   return `${p.name} (${Math.round((open / (p.capacity || 30)) * 100)}% loaded)`;
@@ -84,7 +85,7 @@ export default async function StaffRequest({ params, searchParams }: { params: {
   }
   if (can('assign') || can('reassign')) {
     panels.push(
-      <div key="assign" className="form">
+      <div key="assign" className="form" id="assign">
         <h3>{r.status === 'scoped' ? 'Assign' : 'Reassign'}</h3>
         {r.needsLead ? <p className="small" style={{ margin: 0, color: 'var(--stop)' }}>Routing found no one with capacity. Pick someone or add capacity in Setup.</p> : null}
         <form action={A.assignAction} className="form">
@@ -143,21 +144,22 @@ export default async function StaffRequest({ params, searchParams }: { params: {
       <Link className="back" href="/app">Back to queue</Link>
       <Flash sp={searchParams} />
       <div className="head">
-        <div><div className="muted" style={{ fontFamily: 'var(--display)', fontWeight: 600 }}>ML-{r.num}, {org?.name}</div><h1>{r.title}</h1></div>
+        <div><div className="muted" style={{ fontFamily: 'var(--display)', fontWeight: 600 }}>ML-{r.num}, {org ? <Link href={`/app/clients/${org.id}`}>{org.name}</Link> : null}</div><h1>{r.title}</h1></div>
         <div className="row"><SlaChip r={r} s={s} /></div>
       </div>
       <div className="panel" style={{ marginBottom: 14 }}><Line r={r} full /></div>
       <div className="grid2">
         <div className="stack">
           {panels.length ? <section className="panel stack">{panels}</section> : null}
-          <section className="panel stack"><h2>Details</h2><p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description || 'No description provided.'}</p></section>
+          <section className="panel stack"><h2>Details</h2><p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description ? <Linkify text={r.description} /> : 'No description provided.'}</p></section>
+          <AttachmentsPanel items={d.attachments} v={v} requestId={r.id} back={back} canAdd={can('comment')} />
           <section className="panel stack">
             <h2>Conversation</h2>
             <div className="thread">
               {d.comments.map((c) => (
                 <div key={c.id} className={`msg${c.internal ? ' internal' : ''}${c.fromClient ? ' client' : ''}`}>
                   <div className="by">{c.authorName}, {fmtWhen(c.at)}{c.internal ? ', internal note' : c.fromClient ? ', client' : ''}</div>
-                  <p>{c.body}</p>
+                  <p><Linkify text={c.body} /></p>
                 </div>
               ))}
               {!d.comments.length ? <p className="muted" style={{ margin: 0 }}>No messages yet.</p> : null}
@@ -221,10 +223,11 @@ export default async function StaffRequest({ params, searchParams }: { params: {
               <div><dt>Priority</dt><dd>{PRI[r.priority].label}</dd></div>
               <div><dt>Status</dt><dd>{statusLbl}</dd></div>
               <div><dt>Credits</dt><dd>{support ? 'None (support)' : r.scopedAt ? r.credits : 'After scoping'}</dd></div>
-              <div><dt>Implementer</dt><dd>{people(r.assigneeId)}</dd></div>
-              {support ? null : <div><dt>QA reviewer</dt><dd>{people(r.qaId)}</dd></div>}
+              <div><dt>Implementer</dt><dd>{r.assigneeId ? <Link href={`/app/board?who=${r.assigneeId}`}>{people(r.assigneeId)}</Link> : support && r.status === 'scoped' ? <a href="#assign">Needs an owner</a> : people(r.assigneeId)}</dd></div>
+              {support ? null : <div><dt>QA reviewer</dt><dd>{r.qaId ? <Link href={`/app/board?who=${r.qaId}`}>{people(r.qaId)}</Link> : people(r.qaId)}</dd></div>}
               <div><dt>Came in by</dt><dd>{r.source}{r.contact ? `, ${r.contact}` : ''}</dd></div>
-              <div><dt>Submitted by</dt><dd>{r.submittedByName}</dd></div>
+              <div><dt>Submitted by</dt><dd>{r.submittedBy && L.people.get(r.submittedBy)?.email ? <a href={`mailto:${L.people.get(r.submittedBy)!.email}`}>{r.submittedByName}</a> : r.submittedByName}</dd></div>
+              {org ? <div><dt>Client</dt><dd><Link href={`/app/clients/${org.id}`}>{org.name}</Link></dd></div> : null}
               {support ? <div><dt>Reopened</dt><dd>{r.revisions}</dd></div> : <><div><dt>QA returns</dt><dd>{r.qaFails}</dd></div><div><dt>Revisions</dt><dd>{r.revisions}</dd></div></>}
               {st?.due ? <div><dt>{st.kind} due</dt><dd>{fmtWhen(new Date(st.due))}</dd></div> : null}
               <div><dt>Submitted</dt><dd>{fmtWhen(r.createdAt)}</dd></div>

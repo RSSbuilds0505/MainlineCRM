@@ -6,7 +6,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from './db';
 import {
-  comments, escalations, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
+  attachments, comments, escalations, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
   type AiTriage, type Org, type Priority, type Profile, type Request, type Role, type Settings, type Status,
 } from './db/schema';
 import {
@@ -14,6 +14,8 @@ import {
   monthKey, route, sla, slaHoursFor, supportCategoryLabel,
 } from './core';
 import { SUPPORT_SKU_ROW } from './catalog';
+import { MAX_ATTACHMENTS_PER_REQUEST, MAX_UPLOAD_BYTES, allowedType, checkLink, safeName, typeLabel } from './media';
+import { store } from './storage';
 
 export class UserError extends Error {}
 
@@ -555,6 +557,129 @@ export async function clearFlag(db: DB, v: Viewer, id: string): Promise<Result> 
 }
 
 /* ---------------- time ---------------- */
+
+/* ---------------- attachments ---------------- */
+
+export type UploadTarget = { requestId: string } | { draft: true };
+export type FileRef = { path: string; name: string };
+
+/** Checks the file and returns a one-time upload token. The browser then uploads straight to storage. */
+export async function prepareUpload(db: DB, v: Viewer, target: UploadTarget, file: { name: string; size: number; type: string }): Promise<{ path: string; token: string }> {
+  must(v.active);
+  if (!allowedType(file.type)) throw new UserError('That file type is not supported. Use a screenshot (PNG or JPG), a video (MP4, MOV or WebM), a PDF, or an Office file.');
+  if (!(file.size > 0)) throw new UserError('That file is empty.');
+  if (file.size > MAX_UPLOAD_BYTES) throw new UserError(`That file is over ${MAX_UPLOAD_BYTES / 1024 / 1024} MB. For longer videos, record a Loom and paste the link instead.`);
+  let prefix: string;
+  if ('requestId' in target) {
+    const r = await loadRequest(db, v, target.requestId);
+    must(allowed('comment', r, v), 'Attachments are closed on this request.');
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(attachments).where(eq(attachments.requestId, r.id));
+    if (Number(n) >= MAX_ATTACHMENTS_PER_REQUEST) throw new UserError('This request has reached its attachment limit. Link a shared folder instead.');
+    prefix = `req/${r.id}`;
+  } else {
+    prefix = `draft/${v.id}`;
+  }
+  const path = `${prefix}/${crypto.randomUUID()}-${safeName(file.name)}`;
+  await store().ensureBucket();
+  const { token } = await store().signUpload(path);
+  return { path, token };
+}
+
+/** Verifies an uploaded file really exists in storage under a path this person may use, and reads its true size and type. */
+async function verifyFile(v: Viewer, requestId: string, f: FileRef): Promise<{ path: string; name: string; size: number; mime: string }> {
+  const okPrefix = f.path.startsWith(`req/${requestId}/`) || f.path.startsWith(`draft/${v.id}/`);
+  if (!okPrefix || f.path.includes('..')) throw new UserError('That upload does not belong to this request.');
+  const info = await store().info(f.path);
+  if (!info) throw new UserError('The upload did not finish. Try attaching the file again.');
+  const mime = info.mime ?? '';
+  if (!allowedType(mime)) { await store().remove([f.path]); throw new UserError('That file type is not supported.'); }
+  if (info.size > MAX_UPLOAD_BYTES) { await store().remove([f.path]); throw new UserError('That file is too large.'); }
+  return { path: f.path, name: (f.name || f.path.split('/').pop() || 'file').slice(0, 160), size: info.size, mime };
+}
+
+type NewAttachment = { kind: 'file' | 'link'; name: string; mime?: string | null; size?: number | null; path?: string | null; url?: string | null };
+
+async function insertAttachments(q: DB, out: Outbox, v: Viewer, r: Request, items: NewAttachment[], internalIn: boolean, notify: boolean): Promise<number> {
+  if (!items.length) return 0;
+  const client = v.role === 'client';
+  const internal = !client && internalIn;
+  const [{ n }] = await q.select({ n: sql<number>`count(*)::int` }).from(attachments).where(eq(attachments.requestId, r.id));
+  if (Number(n) + items.length > MAX_ATTACHMENTS_PER_REQUEST) throw new UserError('This request has reached its attachment limit. Link a shared folder instead.');
+  await q.insert(attachments).values(items.map((it) => ({
+    requestId: r.id, kind: it.kind, name: it.name, mime: it.mime ?? null, size: it.size ?? null, path: it.path ?? null, url: it.url ?? null,
+    internal, fromClient: client, uploadedBy: v.id, uploadedByName: v.name,
+  })));
+  const files = items.filter((i) => i.kind === 'file').length, links = items.length - files;
+  const what = [files ? `${files} file${files > 1 ? 's' : ''}` : '', links ? `${links} video link${links > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ');
+  await event(q, v, r, 'attachment', `Attached ${what}${internal ? ' (internal)' : ''}: ${items.map((i) => i.name).join(', ').slice(0, 300)}`);
+  if (notify) {
+    const [org] = await q.select().from(orgs).where(eq(orgs.id, r.orgId));
+    if (client) {
+      await notifyStaff(q, out, v, [r.assigneeId, await csmFor(q, r.orgId)], `${org?.name ?? 'Client'} attached ${what} to ${ref(r)}`, r, 'attachment', true);
+    } else {
+      await notifyStaff(q, out, v, [r.assigneeId, r.qaId, await csmFor(q, r.orgId)], `${v.name} attached ${what} to ${ref(r)}`, r, 'attachment');
+      if (!internal) await notifyClient(q, out, v, r.orgId, `New ${files ? 'files' : 'video'} on ML-${r.num}`, `${v.name} attached ${what} to "${r.title}".`, r);
+    }
+  }
+  return items.length;
+}
+
+/** Records uploaded files on a request after checking each one in storage. */
+export async function addFiles(db: DB, v: Viewer, id: string, files: FileRef[], internal = false): Promise<Result<number>> {
+  if (!files.length) throw new UserError('Choose a file first.');
+  if (files.length > 20) throw new UserError('Attach up to 20 files at a time.');
+  const r0 = await loadRequest(db, v, id);
+  must(allowed('comment', r0, v), 'Attachments are closed on this request.');
+  const checked: Awaited<ReturnType<typeof verifyFile>>[] = [];
+  for (const f of files) checked.push(await verifyFile(v, r0.id, f));
+  return tx(db, async (q, out) => {
+    const r = await loadRequest(q, v, id);
+    return insertAttachments(q, out, v, r, checked.map((c) => ({ kind: 'file' as const, name: c.name, mime: c.mime, size: c.size, path: c.path })), internal, true);
+  });
+}
+
+/** Adds a Loom, YouTube, Vimeo or other link to a request. */
+export async function addLink(db: DB, v: Viewer, id: string, raw: string, internal = false): Promise<Result<number>> {
+  const link = checkLink(raw);
+  if (!link) throw new UserError('Paste a full link that starts with https://, for example a Loom share link.');
+  return tx(db, async (q, out) => {
+    const r = await loadRequest(q, v, id);
+    must(allowed('comment', r, v), 'Attachments are closed on this request.');
+    return insertAttachments(q, out, v, r, [{ kind: 'link', name: link.name, url: link.url }], internal, true);
+  });
+}
+
+/** Attaches files and links chosen on a new-request or new-ticket form. Creation already notified the team, so this stays quiet. */
+export async function attachToNew(db: DB, v: Viewer, id: string, files: FileRef[], rawLinks: string[]): Promise<Result<number>> {
+  const links = rawLinks.map((l) => l.trim()).filter(Boolean);
+  if (!files.length && !links.length) return { value: 0, out: newOutbox() };
+  if (files.length > 20) throw new UserError('Attach up to 20 files at a time.');
+  const checkedLinks = links.map((l) => { const c = checkLink(l); if (!c) throw new UserError('One of the video links is not a full https:// link.'); return c; });
+  const checked: Awaited<ReturnType<typeof verifyFile>>[] = [];
+  for (const f of files) checked.push(await verifyFile(v, id, f));
+  return tx(db, async (q, out) => {
+    const r = await loadRequest(q, v, id);
+    must(allowed('comment', r, v));
+    return insertAttachments(q, out, v, r, [
+      ...checked.map((c) => ({ kind: 'file' as const, name: c.name, mime: c.mime, size: c.size, path: c.path })),
+      ...checkedLinks.map((c) => ({ kind: 'link' as const, name: c.name, url: c.url })),
+    ], false, false);
+  });
+}
+
+/** Removes an attachment. The person who added it, or a lead, can remove it. Returns the storage path to delete. */
+export async function removeAttachment(db: DB, v: Viewer, attachmentId: string): Promise<Result<string | null>> {
+  return tx(db, async (q) => {
+    const [a] = await q.select().from(attachments).where(eq(attachments.id, attachmentId));
+    if (!a) throw new UserError('That attachment was already removed.');
+    const r = await loadRequest(q, v, a.requestId);
+    if (v.role === 'client' && a.internal) throw new UserError('That attachment was not found.');
+    must(a.uploadedBy === v.id || isLeadRole(v.role), 'Only the person who added it, or a lead, can remove it.');
+    await q.delete(attachments).where(eq(attachments.id, a.id));
+    await event(q, v, r, 'attachment', `Removed ${a.kind === 'file' ? typeLabel(a.mime).toLowerCase() : 'link'} "${a.name}"`);
+    return a.path;
+  });
+}
 
 export async function logTime(db: DB, v: Viewer, id: string, input: { hours: number; note: string; workDate: string; staffId?: string }): Promise<Result> {
   if (!(input.hours > 0) || input.hours > 24) throw new UserError('Enter hours between 0.25 and 24.');

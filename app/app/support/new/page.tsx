@@ -18,7 +18,7 @@ export default async function StaffSupport({ searchParams }: { searchParams: Rec
     <>
       <Flash sp={searchParams} />
       <Head title="Log a support ticket" sub="For a client who called, emailed or messaged about a problem. It routes straight to an implementer in their pod, with no credits." />
-      <section className="panel"><SupportForm back="/app/support/new" orgs={orgs} clock={clockWord(s)} /></section>
+      <section className="panel"><SupportForm back="/app/support/new" orgs={orgs} org={searchParams.org} clock={clockWord(s)} /></section>
     </>
   );
 }

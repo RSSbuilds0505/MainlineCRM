@@ -3,8 +3,9 @@ import type { Org, Sku } from '@/lib/db/schema';
 import { PRI, SOURCES } from '@/lib/core';
 import { createRequestAction } from '@/app/actions';
 import { AiSuggest, Submit } from './client';
+import { AttachBox } from './attach';
 
-export function ClientRequestForm({ skus, aiOn }: { skus: Sku[]; aiOn: boolean }): ReactNode {
+export function ClientRequestForm({ skus, aiOn, preselect }: { skus: Sku[]; aiOn: boolean; preselect?: string }): ReactNode {
   const groups = new Map<string, Sku[]>();
   for (const k of skus) groups.set(k.category, [...(groups.get(k.category) ?? []), k]);
   return (
@@ -19,6 +20,7 @@ export function ClientRequestForm({ skus, aiOn }: { skus: Sku[]; aiOn: boolean }
           </label>
           <div />
         </div>
+        <div className="f"><span className="lbl">Screenshots or a walkthrough (optional)</span><AttachBox draft /></div>
         {aiOn ? <AiSuggest formId="nr" /> : null}
       </div>
       <h2>Choose a service</h2>
@@ -28,7 +30,7 @@ export function ClientRequestForm({ skus, aiOn }: { skus: Sku[]; aiOn: boolean }
           <div className="skus">
             {ks.map((k) => (
               <label key={k.id} className="sku">
-                <input type="radio" name="skuId" value={k.id} required />
+                <input type="radio" name="skuId" value={k.id} required defaultChecked={k.id === preselect} />
                 <span className="nm">{k.name}</span>
                 <span className="d">{k.description}</span>
                 <span className="k"><span>{k.credits ? `${k.credits} credits` : 'Quoted after scoping'}</span><span>{k.platform}</span></span>
@@ -62,6 +64,7 @@ export function StaffRequestForm({ orgs, org, skus, aiOn, canTriage }: { orgs: O
         </div>
         <label className="f">Title<input type="text" name="title" required maxLength={160} /></label>
         <label className="f">Request details<textarea name="description" maxLength={8000} placeholder="Paste the client's email or summarize the ask." /></label>
+        <div className="f"><span className="lbl">Screenshots or a walkthrough (optional)</span><AttachBox draft /></div>
         {aiOn ? <AiSuggest formId="nr" orgField="orgId" /> : null}
         <div className="two">
           <label className="f">Service

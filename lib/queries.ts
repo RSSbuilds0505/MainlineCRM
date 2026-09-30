@@ -2,6 +2,7 @@
 import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { DB } from './db';
 import {
+  attachments,
   comments, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, skus, staffRates, timelogs,
   type Org, type Pod, type Profile, type Request, type Sku, type Timelog,
 } from './db/schema';
@@ -43,12 +44,13 @@ export async function requestDetail(db: DB, v: Profile, id: string) {
   const [r] = await db.select().from(requests).where(eq(requests.id, id));
   if (!r || !(await canSeeRequest(db, v, r))) return null;
   const client = v.role === 'client';
-  const [cm, ev, tl] = await Promise.all([
+  const [cm, ev, tl, at] = await Promise.all([
     db.select().from(comments).where(client ? and(eq(comments.requestId, id), eq(comments.internal, false)) : eq(comments.requestId, id)).orderBy(asc(comments.at)),
     client ? Promise.resolve([]) : db.select().from(requestEvents).where(eq(requestEvents.requestId, id)).orderBy(desc(requestEvents.at)),
     client ? Promise.resolve([] as Timelog[]) : db.select().from(timelogs).where(eq(timelogs.requestId, id)).orderBy(desc(timelogs.workDate)),
+    db.select().from(attachments).where(client ? and(eq(attachments.requestId, id), eq(attachments.internal, false)) : eq(attachments.requestId, id)).orderBy(asc(attachments.at)),
   ]);
-  return { r, comments: cm, events: ev, timelogs: tl };
+  return { r, comments: cm, events: ev, timelogs: tl, attachments: at };
 }
 
 export async function unreadCount(db: DB, v: Profile): Promise<number> {

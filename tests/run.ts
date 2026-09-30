@@ -13,6 +13,8 @@ import * as wf from '../lib/workflow';
 import { visibleRequests, requestDetail } from '../lib/queries';
 import { CATALOG } from '../lib/catalog';
 import { bizMs, addBiz, H } from '../lib/core';
+import { memoryStore, setStoreForTests } from '../lib/storage';
+import { videoEmbed, safeName, checkLink } from '../lib/media';
 
 let pass = 0, fail = 0;
 function ok(cond: unknown, name: string): void {
@@ -206,6 +208,50 @@ async function main(): Promise<void> {
   ok(tc.assigneeId === impB.id, 'when no one knows the platform, routing falls back to anyone with capacity in the pod');
   await throws(wf.createSupportTicket(db, imp1, { orgId: orgA, category: 'broken', title: 'x', description: 'y', priority: 'normal' }), 'implementers cannot open tickets on a client\'s behalf')
 
+  console.log('\nAttachments');
+  const mem = memoryStore(); setStoreForTests(mem);
+  const up = await wf.prepareUpload(db, clientA, { requestId: rid }, { name: 'Screen Shot 1.png', size: 2048, type: 'image/png' });
+  ok(up.path.startsWith(`req/${rid}/`) && up.path.endsWith('Screen-Shot-1.png') && !!up.token, 'upload is scoped to the request with a safe file name');
+  await throws(wf.prepareUpload(db, clientA, { requestId: rid }, { name: 'x.html', size: 10, type: 'text/html' }), 'web pages cannot be uploaded');
+  await throws(wf.prepareUpload(db, clientA, { requestId: rid }, { name: 'big.mp4', size: 60 * 1024 * 1024, type: 'video/mp4' }), 'files over 50 MB are refused');
+  await throws(wf.prepareUpload(db, clientB, { requestId: rid }, { name: 'a.png', size: 10, type: 'image/png' }), 'another company cannot upload to this request');
+  await throws(wf.addFiles(db, clientA, rid, [{ path: up.path, name: 'Screen Shot 1.png' }]), 'a file that never finished uploading is not recorded', /did not finish/);
+  mem.put(up.path, 2048, 'image/png');
+  const af = await wf.addFiles(db, clientA, rid, [{ path: up.path, name: 'Screen Shot 1.png' }]);
+  ok(af.value === 1, 'finished upload is recorded');
+  ok(af.out.email.some((e) => /attached 1 file/.test(e.subject)), 'the team is emailed when a client attaches a screenshot');
+  const [otherReq] = await db.select().from(schema.requests).where(eq(schema.requests.orgId, orgB));
+  const stray = `req/${otherReq?.id ?? randomUUID()}/x.png`; mem.put(stray, 10, 'image/png');
+  await throws(wf.addFiles(db, clientA, rid, [{ path: stray, name: 'x.png' }]), 'a file uploaded for a different request cannot be claimed', /does not belong/);
+  const draftB = `draft/${clientB.id}/y.png`; mem.put(draftB, 10, 'image/png');
+  await throws(wf.addFiles(db, clientA, rid, [{ path: draftB, name: 'y.png' }]), "someone else's draft upload cannot be claimed", /does not belong/);
+  const sneaky = `req/${rid}/evil.png`; mem.put(sneaky, 10, 'text/html');
+  await throws(wf.addFiles(db, clientA, rid, [{ path: sneaky, name: 'evil.png' }]), 'the stored type is checked, not the file name', /not supported/);
+  ok(!(await mem.info(sneaky)), 'a rejected file is deleted from storage');
+  const loom = await wf.addLink(db, clientA, rid, 'https://www.loom.com/share/0123456789abcdef0123456789abcdef');
+  ok(loom.value === 1, 'Loom link is attached');
+  await throws(wf.addLink(db, clientA, rid, 'javascript:alert(1)'), 'script links are refused');
+  await throws(wf.addLink(db, clientA, rid, 'not a link'), 'text that is not a link is refused');
+  await wf.addLink(db, csm, rid, 'https://drive.google.com/file/d/abc/view', true);
+  const clientView = await requestDetail(db, clientA, rid);
+  const staffView = await requestDetail(db, csm, rid);
+  ok(clientView!.attachments.length === 2 && staffView!.attachments.length === 3, 'internal attachments are hidden from the client');
+  ok(clientView!.attachments.some((a) => a.name === 'Loom video'), 'Loom link gets a readable name');
+  const du = await wf.prepareUpload(db, clientA, { draft: true }, { name: 'form-error.png', size: 500, type: 'image/png' });
+  ok(du.path.startsWith(`draft/${clientA.id}/`), 'uploads on a new-request form go to the person\'s draft area');
+  mem.put(du.path, 500, 'image/png');
+  const tk2 = await wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'broken', title: 'Report blank', description: 'Dashboard shows nothing.', priority: 'normal' });
+  const at2 = await wf.attachToNew(db, clientA, tk2.value, [{ path: du.path, name: 'form-error.png' }], ['https://youtu.be/dQw4w9WgXcQ', '']);
+  ok(at2.value === 2 && !at2.out.email.length, 'files and links from the form attach to the new ticket without extra emails');
+  const mine = clientView!.attachments.find((a) => a.kind === 'file')!;
+  await throws(wf.removeAttachment(db, clientB, mine.id), 'another company cannot remove it');
+  await throws(wf.removeAttachment(db, imp2, mine.id), 'a teammate who did not add it cannot remove it');
+  const rm = await wf.removeAttachment(db, clientA, mine.id);
+  ok(rm.value === up.path, 'the person who added it can remove it');
+  ok(videoEmbed('https://www.youtube.com/watch?v=dQw4w9WgXcQ')?.provider === 'YouTube' && videoEmbed('https://vimeo.com/123456789')?.provider === 'Vimeo' && videoEmbed('http://www.loom.com/share/0123456789abcdef') === null, 'video links are recognized, and only over https');
+  ok(safeName('../../etc/passwd') === 'etcpasswd' && safeName('   ') === 'file', 'file names cannot climb out of their folder');
+  ok(checkLink('ftp://x.com/a') === null, 'only web links are accepted');
+
   console.log('\nRow Level Security (direct database access with the public key)');
   const asUser = async <T>(uid: string, q: string): Promise<T[]> => {
     await pg.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${uid}', false);`);
@@ -216,6 +262,8 @@ async function main(): Promise<void> {
   ok((await asUser<{ internal: boolean }>(clientA.id, 'select * from comments')).every((x) => !x.internal), 'client cannot read internal notes');
   ok((await asUser(clientA.id, 'select * from request_events')).length === 0, 'client cannot read the activity log');
   ok((await asUser(clientA.id, 'select * from timelogs')).length === 0, 'client cannot read time entries');
+  ok((await asUser<{ internal: boolean }>(clientA.id, 'select * from attachments')).every((x) => !x.internal) && (await asUser(clientA.id, 'select * from attachments')).length > 0, 'client reads its own attachments but never internal ones');
+  ok((await asUser(clientB.id, 'select * from attachments')).length === 0, 'another company reads none of them');
   ok((await asUser(clientA.id, 'select * from orgs')).length === 1, 'client reads only its own company record');
   ok((await asUser(lead.id, 'select * from staff_rates')).length === 0, 'lead cannot read pay rates');
   ok((await asUser(owner.id, 'select * from staff_rates')).length === 1, 'owner can read pay rates');

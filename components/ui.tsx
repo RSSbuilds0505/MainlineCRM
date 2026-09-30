@@ -97,3 +97,21 @@ export function Mark(): ReactNode {
     </div>
   );
 }
+
+const URL_RE = /\bhttps?:\/\/[^\s<>"']+/gi;
+/** Turns web addresses in plain text into links that open in a new tab. Text stays escaped by React. */
+export function Linkify({ text }: { text: string }): ReactNode {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(URL_RE)) {
+    let url = m[0];
+    const trail = url.match(/[).,;:!?\]]+$/)?.[0] ?? '';
+    if (trail) url = url.slice(0, -trail.length);
+    const at = m.index ?? 0;
+    if (at > last) out.push(text.slice(last, at));
+    out.push(<a key={at} href={url} target="_blank" rel="noopener noreferrer nofollow" className="autolink">{url}</a>);
+    last = at + url.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
+}
