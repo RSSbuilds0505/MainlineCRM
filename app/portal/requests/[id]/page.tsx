@@ -5,7 +5,7 @@ import { getDb } from '@/lib/db';
 import { requireClient } from '@/lib/auth';
 import { lookups, requestDetail } from '@/lib/queries';
 import { allowed } from '@/lib/workflow';
-import { CLIENT_LBL, PRI } from '@/lib/core';
+import { PRI, clientStatus, isSupport, supportCategoryLabel } from '@/lib/core';
 import { ClientLine, Flash, fmtWhen } from '@/components/ui';
 import { Submit } from '@/components/client';
 import * as A from '@/app/actions';
@@ -20,15 +20,16 @@ export default async function PortalRequest({ params, searchParams }: { params: 
   const sku = L.skus.get(r.skuId);
   const can = (a: Parameters<typeof allowed>[0]): boolean => allowed(a, r, v);
   const back = `/portal/requests/${r.id}`;
-  const hidden = (<><input type="hidden" name="id" value={r.id} /><input type="hidden" name="back" value={back} /></>);
+  const hidden = (<><input type="hidden" name="id" value={r.id} /><input type="hidden" name="back" value={back} />{isSupport(r) ? <input type="hidden" name="support" value="1" /> : null}</>);
   const lastQuestion = [...d.comments].reverse().find((c) => !c.fromClient);
+  const support = isSupport(r);
   return (
     <>
       <Link className="back" href="/portal">Back to requests</Link>
       <Flash sp={searchParams} />
       <div className="head">
         <div><div className="muted" style={{ fontFamily: 'var(--display)', fontWeight: 600 }}>ML-{r.num}</div><h1>{r.title}</h1></div>
-        <span className={`chip ${r.status === 'waiting' || r.status === 'delivered' ? 'risk' : 'plain'}`}>{CLIENT_LBL[r.status]}</span>
+        <span className={`chip ${r.status === 'waiting' || r.status === 'delivered' ? 'risk' : 'plain'}`}>{clientStatus(r)}</span>
       </div>
       <div className="panel" style={{ marginBottom: 14 }}><ClientLine r={r} full /></div>
       <div className="grid2">
@@ -47,13 +48,15 @@ export default async function PortalRequest({ params, searchParams }: { params: 
           ) : null}
           {can('accept') ? (
             <section className="panel stack" style={{ borderColor: 'var(--signal-fill)' }}>
-              <h2 style={{ margin: 0 }}>Ready for your review</h2>
-              <p style={{ margin: 0 }}>Your team finished this and it passed our quality check. Accept it, or tell us what to change. It closes automatically on {fmtWhen(r.autoAcceptAt)} if we don&apos;t hear back.</p>
-              <form action={A.acceptAction}>{hidden}<Submit className="btn sig">Accept the work</Submit></form>
+              <h2 style={{ margin: 0 }}>{support ? 'Is it fixed?' : 'Ready for your review'}</h2>
+              <p style={{ margin: 0 }}>{support
+                ? `Your team marked this resolved. Confirm it's working, or tell us what is still wrong and we will pick it right back up.`
+                : 'Your team finished this and it passed our quality check. Accept it, or tell us what to change.'} It closes automatically on {fmtWhen(r.autoAcceptAt)} if we don&apos;t hear back.</p>
+              <form action={A.acceptAction}>{hidden}<Submit className="btn sig">{support ? 'Yes, it is fixed' : 'Accept the work'}</Submit></form>
               <form action={A.reviseAction} className="form">
                 {hidden}
-                <label className="f">Or request a change<textarea name="body" required placeholder="What should be different?" /></label>
-                <div><Submit className="btn ghost">Request a revision</Submit></div>
+                <label className="f">{support ? 'Still not working?' : 'Or request a change'}<textarea name="body" required placeholder={support ? 'What is still happening?' : 'What should be different?'} /></label>
+                <div><Submit className="btn ghost">{support ? 'Reopen the ticket' : 'Request a revision'}</Submit></div>
               </form>
             </section>
           ) : null}
@@ -79,7 +82,7 @@ export default async function PortalRequest({ params, searchParams }: { params: 
           </section>
           {(can('cancel') || can('flag')) ? (
             <section className="panel stack">
-              {can('cancel') ? <form action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={`Cancel this request?${r.credits ? ` Its ${r.credits} credits go back to your balance.` : ''}`}>Cancel this request</Submit></form> : null}
+              {can('cancel') ? <form action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={support ? 'Withdraw this ticket?' : `Cancel this request?${r.credits ? ` Its ${r.credits} credits go back to your balance.` : ''}`}>{support ? 'Withdraw this ticket' : 'Cancel this request'}</Submit></form> : null}
               {can('flag') ? (
                 <form action={A.flagAction} className="form">
                   {hidden}
@@ -93,10 +96,10 @@ export default async function PortalRequest({ params, searchParams }: { params: 
         <aside className="stack">
           <section className="panel">
             <dl className="facts">
-              <div><dt>Service</dt><dd>{sku?.name}</dd></div>
+              <div><dt>{support ? 'Type' : 'Service'}</dt><dd>{support ? `Support: ${supportCategoryLabel(r.category)}` : sku?.name}</dd></div>
               <div><dt>Priority</dt><dd>{PRI[r.priority].label}</dd></div>
-              <div><dt>Status</dt><dd>{CLIENT_LBL[r.status]}</dd></div>
-              <div><dt>Credits</dt><dd>{r.scopedAt ? r.credits : 'Confirmed at scoping'}</dd></div>
+              <div><dt>Status</dt><dd>{clientStatus(r)}</dd></div>
+              <div><dt>Credits</dt><dd>{support ? 'None, support is included' : r.scopedAt ? r.credits : 'Confirmed at scoping'}</dd></div>
               <div><dt>Specialist</dt><dd>{r.assigneeId ? L.people.get(r.assigneeId)?.name : 'Being assigned'}</dd></div>
               <div><dt>Submitted by</dt><dd>{r.submittedByName}</dd></div>
               <div><dt>Submitted</dt><dd>{fmtWhen(r.createdAt)}</dd></div>

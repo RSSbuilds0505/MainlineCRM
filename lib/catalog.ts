@@ -12,3 +12,10 @@ export const CATALOG = [
   { id: 'any-training', name: 'Team training session', platform: 'Any', category: 'Enablement', credits: 2, estHours: 2, slaHours: 24, description: 'A recorded 45-minute training for your team on any part of your CRM.', qa: ['Recording shared', 'Follow-up notes sent'] },
   { id: 'any-custom', name: 'Custom scope', platform: 'Any', category: 'Custom work', credits: 0, estHours: 0, slaHours: 40, description: 'Anything not listed. Your team scopes it and confirms credits before work starts.', qa: ['Scope confirmed by the client in writing', 'Deliverables match the scope', 'Walkthrough recorded'] },
 ];
+
+/** Built-in service behind support tickets. Hidden from the catalog; never charges credits. */
+export const SUPPORT_SKU_ROW = {
+  id: 'support', name: 'Support ticket', platform: 'Any', category: 'Support', credits: 0, estHours: 1, slaHours: 16,
+  description: 'Help with something that is broken, confusing, or blocking your team. No credits.', qa: [] as string[],
+};
+

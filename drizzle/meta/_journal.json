@@ -15,6 +15,13 @@
       "when": 1790529985549,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790732541604,
+      "tag": "0002_support_tickets",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Request, Settings } from '@/lib/db/schema';
-import { CLIENT_LBL, CLIENT_LINE, LBL, LINE, TZ, sla } from '@/lib/core';
+import { CLIENT_LINE, LBL, LINE, SUPPORT_CLIENT_LINE, SUPPORT_LBL, SUPPORT_LINE, TZ, clientStatus, isSupport, sla } from '@/lib/core';
 
 export const fmtWhen = (d: Date | string | null | undefined): string =>
   d ? new Date(d).toLocaleString('en-US', { timeZone: TZ, month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
@@ -32,13 +32,17 @@ export function SlaChip({ r, s }: { r: Request; s: Settings }): ReactNode {
 
 export function Line({ r, full }: { r: Request; full?: boolean }): ReactNode {
   if (r.status === 'cancelled') return <div className="cancelled">Cancelled</div>;
-  const cur = r.status === 'waiting' ? 'in_progress' : r.status;
-  const idx = LINE.indexOf(cur);
+  const support = isSupport(r);
+  const line = support ? SUPPORT_LINE : LINE;
+  const label = (st: (typeof LINE)[number]): string => (support ? SUPPORT_LBL[st] ?? LBL[st] : LBL[st]);
+  // A ticket waiting for a lead sits at "scoped"; show it at the first stop.
+  const cur = r.status === 'waiting' || (support && r.status === 'qa') ? 'in_progress' : support && !line.includes(r.status) ? 'assigned' : r.status;
+  const idx = line.indexOf(cur);
   return (
-    <ol className={`line${full ? ' full' : ''}`} aria-label={`Progress: ${LBL[r.status]}`}>
-      {LINE.map((st, i) => {
+    <ol className={`line${full ? ' full' : ''}`} aria-label={`Progress: ${label(r.status)}`}>
+      {line.map((st, i) => {
         const c = i < idx ? 'past' : i === idx ? `now${r.status === 'waiting' ? ' hold' : ''}` : 'next';
-        const l = i === idx && r.status === 'waiting' ? LBL.waiting : LBL[st];
+        const l = i === idx && r.status === 'waiting' ? LBL.waiting : i === idx && support && r.status === 'scoped' ? 'Needs an owner' : label(st);
         return <li key={st} className={c}><span className="stop" /><span className="lbl">{l}</span></li>;
       })}
     </ol>
@@ -46,13 +50,14 @@ export function Line({ r, full }: { r: Request; full?: boolean }): ReactNode {
 }
 
 export function ClientLine({ r, full }: { r: Request; full?: boolean }): ReactNode {
-  if (r.status === 'cancelled') return <div className="cancelled">Cancelled</div>;
-  const idx = CLIENT_LINE.findIndex((x) => x.statuses.includes(r.status));
+  if (r.status === 'cancelled') return <div className="cancelled">{isSupport(r) ? 'Withdrawn' : 'Cancelled'}</div>;
+  const line = isSupport(r) ? SUPPORT_CLIENT_LINE : CLIENT_LINE;
+  const idx = line.findIndex((x) => x.statuses.includes(r.status));
   return (
-    <ol className={`line${full ? ' full' : ''}`} aria-label={`Progress: ${CLIENT_LBL[r.status]}`}>
-      {CLIENT_LINE.map((st, i) => {
+    <ol className={`line${full ? ' full' : ''}`} aria-label={`Progress: ${clientStatus(r)}`}>
+      {line.map((st, i) => {
         const c = i < idx ? 'past' : i === idx ? `now${r.status === 'waiting' ? ' hold' : ''}` : 'next';
-        const l = i === idx ? CLIENT_LBL[r.status] : st.label;
+        const l = i === idx ? clientStatus(r) : st.label;
         return <li key={st.key} className={c}><span className="stop" /><span className="lbl">{l}</span></li>;
       })}
     </ol>
@@ -63,7 +68,7 @@ export function ReqRow({ r, href, meta, right, client }: { r: Request; href: str
   return (
     <Link className="req" href={href}>
       <span className="t">
-        <span><span className="n">ML-{r.num}</span><br /><span className="title">{r.title}</span><br /><span className="meta">{meta}</span></span>
+        <span><span className="n">ML-{r.num}</span>{isSupport(r) ? <span className="tag sup">Support</span> : null}<br /><span className="title">{r.title}</span><br /><span className="meta">{meta}</span></span>
         <span style={{ display: 'grid', gap: 6, justifyItems: 'end' }}>{right}</span>
       </span>
       {client ? <ClientLine r={r} /> : <Line r={r} />}

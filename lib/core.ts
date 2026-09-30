@@ -37,6 +37,48 @@ export const PRI: Record<Priority, { label: string; firstResponse: number; mult:
 export const ROLE_LBL: Record<Role, string> = {
   owner: 'Owner', lead: 'Solutions Lead', csm: 'CSM', implementer: 'Implementer', client: 'Client',
 };
+/* ---------------- support tickets ---------------- */
+
+/** Built-in service id that marks a request as a support ticket (no credits, no scoping, no QA). */
+export const SUPPORT_SKU = 'support';
+export const isSupport = (r: Pick<Request, 'skuId'>): boolean => r.skuId === SUPPORT_SKU;
+/** Services a client can order (everything except the built-in support ticket). */
+export const isCatalogSku = (k: Pick<Sku, 'id'>): boolean => k.id !== SUPPORT_SKU;
+export const SUPPORT_CATEGORIES = [
+  { key: 'broken', label: 'Something is broken', hint: 'A workflow, form, sync or report stopped working.' },
+  { key: 'data', label: 'Data looks wrong', hint: 'Missing, duplicated or incorrect records or numbers.' },
+  { key: 'access', label: 'Access or login', hint: 'Someone cannot log in or cannot see what they need.' },
+  { key: 'question', label: 'How do I...?', hint: 'A question about using your CRM.' },
+  { key: 'other', label: 'Something else', hint: 'Anything that does not fit above.' },
+] as const;
+export type SupportCategory = (typeof SUPPORT_CATEGORIES)[number]['key'];
+export const supportCategoryLabel = (k: string | null | undefined): string => SUPPORT_CATEGORIES.find((c) => c.key === k)?.label ?? 'Support';
+/** Resolution target in the SLA clock's hours (business hours by default). */
+export const SUPPORT_SLA: Record<Priority, number> = { urgent: 4, high: 8, normal: 16, low: 24 };
+export const SUPPORT_URGENCY: Record<Priority, string> = {
+  urgent: 'Your team is blocked right now',
+  high: 'A key process is failing',
+  normal: 'Something is off, but work continues',
+  low: 'A question or minor issue',
+};
+/** Staff progress line for tickets. */
+export const SUPPORT_LINE: Status[] = ['assigned', 'in_progress', 'delivered', 'closed'];
+export const SUPPORT_LBL: Partial<Record<Status, string>> = { delivered: 'Resolved', closed: 'Closed' };
+/** What a client sees for a ticket. */
+export const SUPPORT_CLIENT_LBL: Record<Status, string> = {
+  submitted: 'Received', triaged: 'Received', scoped: 'Received', assigned: 'Assigned', in_progress: 'Working on it',
+  waiting: 'Needs your reply', qa: 'Working on it', delivered: 'Resolved, please confirm', closed: 'Closed', cancelled: 'Withdrawn',
+};
+export const SUPPORT_CLIENT_LINE: { key: string; label: string; statuses: Status[] }[] = [
+  { key: 'received', label: 'Received', statuses: ['submitted', 'triaged', 'scoped'] },
+  { key: 'assigned', label: 'Assigned', statuses: ['assigned'] },
+  { key: 'progress', label: 'Working on it', statuses: ['in_progress', 'waiting', 'qa'] },
+  { key: 'resolved', label: 'Resolved', statuses: ['delivered'] },
+  { key: 'closed', label: 'Closed', statuses: ['closed'] },
+];
+/** Client-facing status label for any request. */
+export const clientStatus = (r: Pick<Request, 'skuId' | 'status'>): string => (isSupport(r) ? SUPPORT_CLIENT_LBL : CLIENT_LBL)[r.status];
+
 /** Minimum length for account passwords. */
 export const MIN_PASSWORD = 10;
 

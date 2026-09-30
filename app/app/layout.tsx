@@ -21,7 +21,7 @@ export default async function StaffLayout({ children }: { children: ReactNode })
   const items = [
     { href: '/app', label: v.role === 'owner' ? 'Needs attention' : 'My queue', exact: true },
     { href: '/app/board', label: 'Board' },
-    ...(isCsmRole(v.role) ? [{ href: '/app/new', label: 'New request' }] : []),
+    ...(isCsmRole(v.role) ? [{ href: '/app/new', label: 'New request' }, { href: '/app/support/new', label: 'Log ticket' }] : []),
     { href: '/app/inbox', label: 'Inbox', count: unread },
     { href: '/app/time', label: lead ? 'Time' : 'My time' },
     { href: '/app/clients', label: 'Clients' },

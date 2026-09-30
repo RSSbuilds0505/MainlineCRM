@@ -5,7 +5,7 @@ import { getDb } from '@/lib/db';
 import { requireStaff } from '@/lib/auth';
 import { getSettings, lookups, requestDetail } from '@/lib/queries';
 import { allowed, openHoursByStaff } from '@/lib/workflow';
-import { LBL, PRI, TZ, clockWord, isLeadRole, sla, slaHoursFor } from '@/lib/core';
+import { LBL, PRI, SUPPORT_LBL, TZ, clockWord, isCatalogSku, isLeadRole, isSupport, sla, slaHoursFor, supportCategoryLabel } from '@/lib/core';
 import { llmEnabled } from '@/lib/llm';
 import type { Profile } from '@/lib/db/schema';
 import { Flash, Line, SlaChip, fmtDay, fmtWhen, hrs } from '@/components/ui';
@@ -37,10 +37,13 @@ export default async function StaffRequest({ params, searchParams }: { params: {
   const today = new Date().toLocaleDateString('en-CA', { timeZone: TZ });
   const hidden = (<><input type="hidden" name="id" value={r.id} /><input type="hidden" name="back" value={back} /></>);
   const people = (id: string | null): string => (id ? L.people.get(id)?.name ?? 'Unknown' : 'Not yet');
+  const support = isSupport(r);
+  const statusLbl = (support && SUPPORT_LBL[r.status]) || LBL[r.status];
 
   const panels: ReactNode[] = [];
   if (r.status === 'waiting') panels.push(<p key="w" style={{ margin: 0 }}><strong>Waiting on the client.</strong> They can reply in their portal. If they answered by email or phone, paste it below and choose &quot;Log as the client&apos;s answer&quot;.</p>);
-  if (r.status === 'delivered') panels.push(<p key="d" style={{ margin: 0 }}><strong>Delivered.</strong> The client can accept it in their portal. It closes on its own after {fmtWhen(r.autoAcceptAt)}.</p>);
+  if (r.status === 'delivered') panels.push(<p key="d" style={{ margin: 0 }}><strong>{support ? 'Resolved.' : 'Delivered.'}</strong> The client can {support ? 'confirm the fix' : 'accept it'} in their portal. It closes on its own after {fmtWhen(r.autoAcceptAt)}.</p>);
+  if (support && r.status === 'scoped') panels.push(<p key="own" style={{ margin: 0, color: 'var(--stop)' }}><strong>This support ticket needs an owner.</strong> No implementer had capacity when it came in. Assign someone below.</p>);
   if (can('triage')) {
     const skuSel = r.ai?.skuId ?? r.skuId, priSel = r.ai?.priority ?? r.priority;
     panels.push(
@@ -55,7 +58,7 @@ export default async function StaffRequest({ params, searchParams }: { params: {
         <form action={A.triageAction} className="form">
           {hidden}
           <div className="two">
-            <label className="f">Service<select name="skuId" defaultValue={skuSel}>{[...L.skus.values()].filter((k) => k.active && (k.platform === 'Any' || k.platform === org?.platform)).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>
+            <label className="f">Service<select name="skuId" defaultValue={skuSel}>{[...L.skus.values()].filter((k) => k.active && isCatalogSku(k) && (k.platform === 'Any' || k.platform === org?.platform)).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>
             <label className="f">Priority<select name="priority" defaultValue={priSel}>{(Object.keys(PRI) as (keyof typeof PRI)[]).map((k) => <option key={k} value={k}>{PRI[k].label}</option>)}</select></label>
           </div>
           <div className="row"><Submit>Confirm triage</Submit></div>
@@ -88,7 +91,7 @@ export default async function StaffRequest({ params, searchParams }: { params: {
           {hidden}
           <div className="two">
             <label className="f">Implementer<select name="assigneeId" defaultValue={r.assigneeId ?? ''} required><option value="" disabled>Pick someone</option>{implementers.map((p) => <option key={p.id} value={p.id}>{load(p, open.get(p.id) ?? 0)}</option>)}</select></label>
-            <label className="f">QA reviewer<select name="qaId" defaultValue={r.qaId ?? ''}><option value="">Keep current</option>{reviewers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            {support ? <div /> : <label className="f">QA reviewer<select name="qaId" defaultValue={r.qaId ?? ''}><option value="">Keep current</option>{reviewers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
           </div>
           <div className="row"><Submit>Save assignment</Submit></div>
         </form>
@@ -97,14 +100,24 @@ export default async function StaffRequest({ params, searchParams }: { params: {
     );
   }
   const buttons: ReactNode[] = [];
-  if (can('start')) buttons.push(<form key="start" action={A.startAction}>{hidden}<Submit>Start work</Submit></form>);
+  if (can('start')) buttons.push(<form key="start" action={A.startAction}>{hidden}<Submit>{support ? 'Start on this ticket' : 'Start work'}</Submit></form>);
   if (can('submitqa')) buttons.push(<form key="qa" action={A.submitQaAction}>{hidden}<Submit confirmText={logged ? undefined : 'No time is logged on this request yet. Submit for QA anyway?'}>Submit for QA</Submit></form>);
   if (can('resume')) buttons.push(<form key="resume" action={A.resumeAction}>{hidden}<Submit className="btn ghost">Resume without an answer</Submit></form>);
-  if (can('accept')) buttons.push(<form key="acc" action={A.acceptAction}>{hidden}<Submit className="btn sig">Record client sign-off</Submit></form>);
+  if (can('accept')) buttons.push(<form key="acc" action={A.acceptAction}>{hidden}<Submit className="btn sig">{support ? 'Client confirmed the fix' : 'Record client sign-off'}</Submit></form>);
   if (can('autoclose')) buttons.push(<form key="ac" action={A.autoCloseAction}>{hidden}<Submit className="btn ghost">Close (no response in 5 days)</Submit></form>);
   if (can('clearflag')) buttons.push(<form key="cf" action={A.clearFlagAction}>{hidden}<Submit className="btn ghost">Mark concern resolved</Submit></form>);
-  if (can('cancel')) buttons.push(<form key="cancel" action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={`Cancel this request?${r.credits ? ` ${r.credits} credits go back to the client.` : ''}`}>Cancel request</Submit></form>);
+  if (can('cancel')) buttons.push(<form key="cancel" action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={`Cancel this request?${r.credits ? ` ${r.credits} credits go back to the client.` : ''}`}>{support ? 'Withdraw ticket' : 'Cancel request'}</Submit></form>);
   if (buttons.length) panels.push(<div key="btns" className="row">{buttons}</div>);
+  if (can('resolve')) {
+    panels.push(
+      <form key="resolve" action={A.resolveAction} className="form">
+        {hidden}
+        <h3>Resolve this ticket</h3>
+        <label className="f">What did you fix or answer? The client sees this.<textarea name="body" required placeholder="What was wrong, what you changed, and anything they should do now." /></label>
+        <div className="row"><Submit className="btn sig" confirmText={logged ? undefined : 'No time is logged on this ticket yet. Resolve anyway?'}>Mark resolved</Submit></div>
+      </form>,
+    );
+  }
   if (can('qa')) {
     panels.push(
       <form key="qaf" action={A.passQaAction} className="form">
@@ -204,16 +217,15 @@ export default async function StaffRequest({ params, searchParams }: { params: {
         <aside className="stack">
           <section className="panel">
             <dl className="facts">
-              <div><dt>Service</dt><dd>{sku?.name}</dd></div>
+              <div><dt>{support ? 'Type' : 'Service'}</dt><dd>{support ? `Support: ${supportCategoryLabel(r.category)}` : sku?.name}</dd></div>
               <div><dt>Priority</dt><dd>{PRI[r.priority].label}</dd></div>
-              <div><dt>Status</dt><dd>{LBL[r.status]}</dd></div>
-              <div><dt>Credits</dt><dd>{r.scopedAt ? r.credits : 'After scoping'}</dd></div>
+              <div><dt>Status</dt><dd>{statusLbl}</dd></div>
+              <div><dt>Credits</dt><dd>{support ? 'None (support)' : r.scopedAt ? r.credits : 'After scoping'}</dd></div>
               <div><dt>Implementer</dt><dd>{people(r.assigneeId)}</dd></div>
-              <div><dt>QA reviewer</dt><dd>{people(r.qaId)}</dd></div>
+              {support ? null : <div><dt>QA reviewer</dt><dd>{people(r.qaId)}</dd></div>}
               <div><dt>Came in by</dt><dd>{r.source}{r.contact ? `, ${r.contact}` : ''}</dd></div>
               <div><dt>Submitted by</dt><dd>{r.submittedByName}</dd></div>
-              <div><dt>QA returns</dt><dd>{r.qaFails}</dd></div>
-              <div><dt>Revisions</dt><dd>{r.revisions}</dd></div>
+              {support ? <div><dt>Reopened</dt><dd>{r.revisions}</dd></div> : <><div><dt>QA returns</dt><dd>{r.qaFails}</dd></div><div><dt>Revisions</dt><dd>{r.revisions}</dd></div></>}
               {st?.due ? <div><dt>{st.kind} due</dt><dd>{fmtWhen(new Date(st.due))}</dd></div> : null}
               <div><dt>Submitted</dt><dd>{fmtWhen(r.createdAt)}</dd></div>
             </dl>

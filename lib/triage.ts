@@ -1,12 +1,13 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne } from 'drizzle-orm';
 import type { DB } from './db';
 import { skus, type AiTriage, type Org } from './db/schema';
+import { SUPPORT_SKU } from './core';
 import { complete } from './llm';
 import { TRIAGE_V1 } from './llm/prompts';
 
 /** AI suggestion for service, priority and clarifying questions. Returns null when AI is off or fails. */
 export async function aiTriage(db: DB, org: Pick<Org, 'platform'>, text: string): Promise<AiTriage | null> {
-  const list = await db.select().from(skus).where(and(eq(skus.active, true), inArray(skus.platform, ['Any', org.platform])));
+  const list = await db.select().from(skus).where(and(eq(skus.active, true), ne(skus.id, SUPPORT_SKU), inArray(skus.platform, ['Any', org.platform])));
   const catalog = list.map((k) => ({ code: k.id, name: k.name, category: k.category, description: k.description }));
   const res = await complete({ purpose: TRIAGE_V1.version, system: TRIAGE_V1.system, prompt: TRIAGE_V1.build(org.platform, catalog, text), maxTokens: 500, timeoutMs: 20_000 });
   if (!res) return null;

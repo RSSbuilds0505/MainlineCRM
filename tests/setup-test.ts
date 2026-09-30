@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   const id = randomUUID();
   const o1 = await ensureOwner(db, id, 'Josh@X.co', 'Josh'); const o2 = await ensureOwner(db, id, 'josh@x.co', 'Josh');
   const skus = await db.select().from(schema.skus);
-  const ok = a1.length === 2 && a2.length === 0 && o1 && !o2 && skus.length === 11;
+  const ok = a1.length === 3 && a2.length === 0 && o1 && !o2 && skus.length === 12 && skus.some((k) => k.id === 'support');
   console.log({ first: a1, second: a2, ownerCreated: o1, ownerSecond: o2, skus: skus.length }, ok ? 'SETUP OK' : 'SETUP FAIL');
   process.exit(ok ? 0 : 1);
 }

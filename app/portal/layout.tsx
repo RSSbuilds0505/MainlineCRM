@@ -31,7 +31,7 @@ export default async function PortalLayout({ children }: { children: ReactNode }
             <form action="/auth/signout" method="post"><button className="btn ghost sm" type="submit">Sign out</button></form>
           </div>
         </div>
-        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: 'New request' }, { href: '/portal/services', label: 'Services' }, { href: '/portal/account', label: 'Account' }]} />
+        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: 'New request' }, { href: '/portal/support/new', label: 'Get support' }, { href: '/portal/services', label: 'Services' }, { href: '/portal/account', label: 'Account' }]} />
       </header>
       <main>{pw ? null : <PasswordNudge href="/portal/account" />}{children}</main>
       <AutoRefresh seconds={60} />

@@ -24,12 +24,12 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
   return (
     <>
       <Flash sp={searchParams} />
-      <Head title={org.name} sub={`${org.platform}, ${org.plan} plan`}><Link className="btn sig" href="/portal/new">New request</Link></Head>
+      <Head title={org.name} sub={`${org.platform}, ${org.plan} plan`}><div className="row"><Link className="btn ghost" href="/portal/support/new">Get support</Link><Link className="btn sig" href="/portal/new">New request</Link></div></Head>
       <div className="grid2">
         <section className="stack">
           {needsYou.length ? <><h2>Needs your attention</h2><ClientList reqs={needsYou} L={L} empty="" /></> : null}
           <h2>Open requests</h2>
-          <ClientList reqs={open.filter((r) => !needsYou.includes(r))} L={L} empty="Nothing else open. When you need something changed in your CRM, start a new request." />
+          <ClientList reqs={open.filter((r) => !needsYou.includes(r))} L={L} empty="Nothing else open. Start a new request when you need something built or changed, or open a support ticket if something is not working." />
           {done.length ? (
             <div className="stack">
               <div><Link className="btn ghost sm" href={showClosed ? '/portal' : '/portal?closed=1'}>{showClosed ? 'Hide' : 'Show'} completed requests ({done.length})</Link></div>
@@ -42,6 +42,10 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
             <p style={{ margin: '8px 0 6px' }}><strong style={{ fontSize: 20 }}>{org.credits}</strong> <span className="muted">of {org.monthlyCredits} left this month</span></p>
             <div className={`meter ${pct < 20 ? 'hot' : pct < 40 ? 'warm' : ''}`}><i style={{ width: `${pct}%` }} /></div>
             <p className="small muted" style={{ margin: '8px 0 0' }}>Credits are used when your team confirms a request&apos;s scope, and refill on the 1st.</p>
+          </div>
+          <div className="panel"><h3>Need help?</h3>
+            <p className="small" style={{ margin: '8px 0 10px' }}>Something broken, data looking wrong, or a quick question? Open a support ticket. It goes straight to your implementer and never uses credits.</p>
+            <Link className="btn ghost sm" href="/portal/support/new">Open a support ticket</Link>
           </div>
           <div className="panel"><h3>Your team</h3>
             <div className="team" style={{ marginTop: 10 }}>

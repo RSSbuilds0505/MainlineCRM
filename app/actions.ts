@@ -182,6 +182,21 @@ export async function resumeAction(fd: FormData): Promise<never> {
 export async function commentAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/'), (db, v) => wf.comment(db, v, s(fd, 'id'), s(fd, 'body'), { internal: b(fd, 'internal'), asClientAnswer: s(fd, 'mode') === 'clientAnswer' }), 'Posted.');
 }
+export async function supportTicketAction(fd: FormData): Promise<never> {
+  const back = safeBack(fd, '/portal/support/new');
+  return run(back, async (db, v) => {
+    // Rate limit so a stuck form or script cannot flood the team.
+    const lim = await allow(db, `ticket:${v.id}`, 20, 3600);
+    if (!lim.ok) throw new wf.UserError('You have opened a lot of tickets in the last hour. Add details to an existing ticket, or try again later.');
+    return wf.createSupportTicket(db, v, {
+      orgId: v.role === 'client' ? v.orgId ?? '' : s(fd, 'orgId'), category: s(fd, 'category'), title: s(fd, 'title'),
+      description: s(fd, 'description'), priority: (s(fd, 'priority') || 'normal') as Priority, contact: s(fd, 'contact'),
+    });
+  }, 'Support ticket opened. Your team has been notified.', (id) => (typeof id === 'string' ? `${isClientPath(back) ? '/portal' : '/app'}/requests/${id}` : undefined));
+}
+export async function resolveAction(fd: FormData): Promise<never> {
+  return run(safeBack(fd, '/app'), (db, v) => wf.resolveTicket(db, v, s(fd, 'id'), s(fd, 'body')), 'Marked resolved. The client has been asked to confirm.');
+}
 export async function submitQaAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.submitQa(db, v, s(fd, 'id')), 'Sent to QA.');
 }
@@ -192,10 +207,10 @@ export async function failQaAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.failQa(db, v, s(fd, 'id'), s(fd, 'body')), 'Returned to the implementer.');
 }
 export async function acceptAction(fd: FormData): Promise<never> {
-  return run(safeBack(fd, '/'), (db, v) => wf.accept(db, v, s(fd, 'id')), 'Accepted. Thank you.');
+  return run(safeBack(fd, '/'), (db, v) => wf.accept(db, v, s(fd, 'id')), b(fd, 'support') ? 'Thanks for confirming. The ticket is closed.' : 'Accepted. Thank you.');
 }
 export async function reviseAction(fd: FormData): Promise<never> {
-  return run(safeBack(fd, '/'), (db, v) => wf.revise(db, v, s(fd, 'id'), s(fd, 'body')), 'Revision requested. Your team has been notified.');
+  return run(safeBack(fd, '/'), (db, v) => wf.revise(db, v, s(fd, 'id'), s(fd, 'body')), b(fd, 'support') ? 'Ticket reopened. Your implementer has been notified.' : 'Revision requested. Your team has been notified.');
 }
 export async function autoCloseAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.autoClose(db, v, s(fd, 'id')), 'Closed.');

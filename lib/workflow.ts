@@ -10,8 +10,10 @@ import {
   type AiTriage, type Org, type Priority, type Profile, type Request, type Role, type Settings, type Status,
 } from './db/schema';
 import {
-  ACTIVE, DAY, PRI, WORKING, bizMs, clockWord, isCsmRole, isLeadRole, isStaffRole, monthKey, route, sla, slaHoursFor,
+  ACTIVE, DAY, PRI, SUPPORT_CATEGORIES, SUPPORT_SKU, SUPPORT_SLA, WORKING, bizMs, clockWord, isCsmRole, isLeadRole, isStaffRole, isSupport,
+  monthKey, route, sla, slaHoursFor, supportCategoryLabel,
 } from './core';
+import { SUPPORT_SKU_ROW } from './catalog';
 
 export class UserError extends Error {}
 
@@ -23,23 +25,26 @@ const newOutbox = (): Outbox => ({ email: [], slack: [] });
 
 export type Action =
   | 'triage' | 'scope' | 'assign' | 'reassign' | 'start' | 'ask' | 'submitqa' | 'resume' | 'qa' | 'accept' | 'revise'
-  | 'autoclose' | 'cancel' | 'flag' | 'clearflag' | 'internal' | 'logtime' | 'comment' | 'clientReply';
+  | 'autoclose' | 'cancel' | 'flag' | 'clearflag' | 'internal' | 'logtime' | 'comment' | 'clientReply' | 'resolve';
 
-export function allowed(action: Action, r: Pick<Request, 'status' | 'assigneeId' | 'qaId' | 'unhappy' | 'autoAcceptAt' | 'orgId'>, v: Viewer): boolean {
+export function allowed(action: Action, r: Pick<Request, 'status' | 'assigneeId' | 'qaId' | 'unhappy' | 'autoAcceptAt' | 'orgId' | 'skuId'>, v: Viewer): boolean {
   if (!v.active) return false;
   const staff = isStaffRole(v.role), lead = isLeadRole(v.role), csm = isCsmRole(v.role);
   const client = v.role === 'client' && v.orgId === r.orgId;
   const mine = r.assigneeId === v.id;
+  const support = isSupport(r);
   switch (action) {
     case 'triage': return r.status === 'submitted' && csm;
     case 'scope': return r.status === 'triaged' && csm;
     case 'assign': return r.status === 'scoped' && csm;
     case 'reassign': return WORKING.includes(r.status) && csm;
     case 'start': return r.status === 'assigned' && (mine || lead);
-    case 'ask': case 'submitqa': return r.status === 'in_progress' && (mine || lead);
+    case 'ask': return r.status === 'in_progress' && (mine || lead);
+    case 'submitqa': return !support && r.status === 'in_progress' && (mine || lead);
+    case 'resolve': return support && r.status === 'in_progress' && (mine || lead);
     case 'clientReply': return r.status === 'waiting' && csm;
     case 'resume': return r.status === 'waiting' && staff;
-    case 'qa': return r.status === 'qa' && (r.qaId === v.id || lead);
+    case 'qa': return !support && r.status === 'qa' && (r.qaId === v.id || lead);
     case 'accept': case 'revise': return r.status === 'delivered' && (client || csm);
     case 'autoclose': return r.status === 'delivered' && csm && !!r.autoAcceptAt && Date.now() >= new Date(r.autoAcceptAt).getTime();
     case 'cancel': return ['submitted', 'triaged', 'scoped', 'assigned'].includes(r.status) && (client || csm);
@@ -165,7 +170,7 @@ export async function createRequest(db: DB, v: Viewer, input: NewRequest): Promi
     const [org] = await q.select().from(orgs).where(eq(orgs.id, input.orgId));
     if (!org || !org.active) throw new UserError('That client account is not active.');
     const [sku] = await q.select().from(skus).where(eq(skus.id, input.skuId));
-    if (!sku || !sku.active || (sku.platform !== 'Any' && sku.platform !== org.platform)) throw new UserError('Pick a service from the catalog.');
+    if (!sku || !sku.active || sku.id === SUPPORT_SKU || (sku.platform !== 'Any' && sku.platform !== org.platform)) throw new UserError('Pick a service from the catalog.');
     const client = v.role === 'client';
     const triageNow = !client && !!input.triageNow && isCsmRole(v.role);
     const now = new Date();
@@ -186,6 +191,85 @@ export async function createRequest(db: DB, v: Viewer, input: NewRequest): Promi
       await notifyClient(q, out, v, org.id, `We received ML-${r.num}: ${r.title}`, `Thanks, ${org.name}. Your request "${r.title}" is in. Your team will confirm the scope shortly.`, r, true);
     }
     return r.id;
+  });
+}
+
+export type NewTicket = { orgId: string; category: string; title: string; description: string; priority: Priority; contact?: string };
+
+/**
+ * Opens a support ticket. Tickets skip triage and scoping: no credits are charged, the resolution
+ * clock starts right away, and routing assigns an implementer in the client's pod immediately.
+ */
+export async function createSupportTicket(db: DB, v: Viewer, input: NewTicket): Promise<Result<string>> {
+  const title = input.title.trim();
+  if (!title) throw new UserError('Give the issue a short summary.');
+  if (title.length > 160) throw new UserError('Keep the summary under 160 characters.');
+  if (!input.description.trim()) throw new UserError('Describe what is happening so the team can start right away.');
+  if (input.description.length > 8000) throw new UserError('The description is too long. Keep it under 8,000 characters.');
+  if (!PRI[input.priority]) throw new UserError('Pick how urgent this is.');
+  if (!SUPPORT_CATEGORIES.some((c) => c.key === input.category)) throw new UserError('Pick what kind of help you need.');
+  if (v.role === 'client') must(v.orgId === input.orgId);
+  else must(isCsmRole(v.role) && v.active, 'Only a CSM, lead or the owner can log a ticket for a client.');
+  const s = await getSettings(db);
+  return tx(db, async (q, out) => {
+    const [org] = await q.select().from(orgs).where(eq(orgs.id, input.orgId));
+    if (!org || !org.active) throw new UserError('That client account is not active.');
+    await q.insert(skus).values(SUPPORT_SKU_ROW).onConflictDoNothing();
+    const client = v.role === 'client';
+    const staff = await activeStaff(q);
+    const recent = await q.select({ a: requests.assigneeId }).from(requests)
+      .where(and(eq(requests.orgId, org.id), inArray(requests.status, ['delivered', 'closed']))).orderBy(desc(requests.deliveredAt)).limit(10);
+    const routing = { orgId: org.id, podId: org.podId, staff, openHours: await openHoursByStaff(q), recentAssignees: recent.map((x) => x.a).filter((x): x is string => !!x) };
+    // Prefer someone who knows the client's platform; fall back to anyone with capacity.
+    let rt = route({ ...routing, sku: { platform: org.platform } });
+    if (!rt.assigneeId) rt = route({ ...routing, sku: { platform: 'Any' } });
+    const now = new Date();
+    const hours = SUPPORT_SLA[input.priority];
+    const [r] = await q.insert(requests).values({
+      orgId: org.id, skuId: SUPPORT_SKU, category: input.category, title, description: input.description.trim(), priority: input.priority,
+      status: rt.assigneeId ? 'assigned' : 'scoped', source: client ? 'Client portal' : 'Logged by team',
+      contact: client ? v.name : (input.contact ?? '').slice(0, 120), submittedBy: v.id, submittedByName: v.name,
+      credits: 0, slaHours: hours, estHours: 1, scopedAt: now, firstResponseAt: now,
+      assigneeId: rt.assigneeId, qaId: null, needsLead: !rt.assigneeId,
+    }).returning();
+    const cat = supportCategoryLabel(input.category);
+    const assignee = staff.find((p) => p.id === rt.assigneeId);
+    await event(q, v, r, 'status', `${client ? 'Support ticket opened from the portal' : 'Support ticket logged by the team'}: ${cat}, ${PRI[r.priority].label} priority`, undefined, 'submitted');
+    const csm = await csmFor(q, org.id);
+    if (assignee) {
+      await event(q, null, r, 'status', `Routed to ${assignee.name}. Resolve within ${hours} ${clockWord(s)}. ${rt.reason}`.trim(), 'submitted', 'assigned');
+      await notifyStaff(q, out, v, [assignee.id], `Support ticket for you: ${ref(r)} from ${org.name} (${PRI[r.priority].label})`, r, 'assigned', true);
+      await notifyStaff(q, out, v, [csm], `New support ticket from ${org.name}: ${ref(r)}, routed to ${assignee.name}`, r, 'new');
+    } else {
+      await event(q, null, r, 'status', `No implementer with capacity. Waiting for a lead to assign. ${rt.reason}`.trim(), 'submitted', 'scoped');
+      await notifyStaff(q, out, v, [csm, ...(await leadIds(q))], `Support ticket needs an owner: ${ref(r)} from ${org.name}`, r, 'needs-lead', true);
+    }
+    if (r.priority === 'urgent' || r.priority === 'high' || !assignee) {
+      out.slack.push(`${PRI[r.priority].label} support ticket from ${org.name}: ML-${r.num} ${r.title} (${cat})${assignee ? `, assigned to ${assignee.name}` : ', needs an owner'}`);
+    }
+    if (client) {
+      await notifyClient(q, out, v, org.id, `We received your support ticket ML-${r.num}`,
+        `Thanks, ${org.name}. Your support ticket "${r.title}" is in${assignee ? ` and ${assignee.name.split(' ')[0]} is on it` : ''}. Our target is to resolve it within ${hours} ${clockWord(s)}. Support tickets never use credits.`, r, true);
+    }
+    return r.id;
+  });
+}
+
+/** The implementer marks a ticket resolved with a note for the client, who confirms or reopens it. */
+export async function resolveTicket(db: DB, v: Viewer, id: string, note: string): Promise<Result> {
+  const body = note.trim();
+  if (!body) throw new UserError('Tell the client what you fixed or answered.');
+  if (body.length > 8000) throw new UserError('That note is too long.');
+  return tx(db, async (q, out) => {
+    const r = await loadRequest(q, v, id);
+    must(allowed('resolve', r, v));
+    const now = new Date();
+    await q.insert(comments).values({ requestId: r.id, authorId: v.id, authorName: v.name, body, internal: false });
+    await patch(q, r, { status: 'delivered', deliveredAt: now, autoAcceptAt: new Date(now.getTime() + 5 * DAY) });
+    await event(q, v, r, 'status', 'Resolved. Waiting for the client to confirm.', 'in_progress', 'delivered');
+    await notifyStaff(q, out, v, [await csmFor(q, r.orgId)], `Resolved: ${ref(r)}`, r, 'delivered');
+    await notifyClient(q, out, v, r.orgId, `ML-${r.num} is resolved`,
+      `${v.name} resolved your support ticket "${r.title}":\n\n${body}\n\nIf it is fixed, confirm in the portal. If not, tell us and we will pick it right back up. It closes automatically in 5 days.`, r);
   });
 }
 

@@ -2,7 +2,7 @@
 import { sql, eq } from 'drizzle-orm';
 import type { DB } from './db';
 import { MIGRATIONS } from './migrations.generated';
-import { CATALOG } from './catalog';
+import { CATALOG, SUPPORT_SKU_ROW } from './catalog';
 import { pods, profiles, settings, skus } from './db/schema';
 import { rowsOf } from './workflow';
 
@@ -25,6 +25,7 @@ export async function applyMigrations(db: DB): Promise<string[]> {
 export async function seedBasics(db: DB): Promise<void> {
   await db.insert(settings).values({ id: 1 }).onConflictDoNothing();
   for (const k of CATALOG) await db.insert(skus).values(k).onConflictDoNothing();
+  await db.insert(skus).values(SUPPORT_SKU_ROW).onConflictDoNothing();
   const [pod] = await db.select().from(pods).limit(1);
   if (!pod) await db.insert(pods).values({ name: 'Pod 1' });
 }

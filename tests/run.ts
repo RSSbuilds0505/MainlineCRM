@@ -164,6 +164,48 @@ async function main(): Promise<void> {
   await wf.setRate(db, owner, imp1.id, 30);
   await throws(wf.saveProfile(db, lead, { id: owner.id, email: owner.email, name: 'x', role: 'implementer', orgId: null, podId: null, platforms: [], capacity: 1, active: false }, false), 'lead cannot demote the owner');
 
+  console.log('\nSupport tickets');
+  const creditsBefore = (await db.select().from(schema.orgs).where(eq(schema.orgs.id, orgA)))[0].credits;
+  const tk = await wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'broken', title: 'Form not submitting', description: 'The demo form throws an error since this morning.', priority: 'high' });
+  let [t] = await db.select().from(schema.requests).where(eq(schema.requests.id, tk.value));
+  ok(t.skuId === 'support' && t.category === 'broken', 'ticket is stored as a support ticket with its category');
+  ok(t.status === 'assigned' && [imp1.id, imp2.id].includes(t.assigneeId ?? ''), 'ticket skips triage and scoping and routes to an implementer in the client pod');
+  ok(t.qaId === null && t.credits === 0 && t.slaHours === 8 && !!t.scopedAt, 'no QA reviewer, no credits, 8-hour target for High, clock started');
+  ok((await db.select().from(schema.orgs).where(eq(schema.orgs.id, orgA)))[0].credits === creditsBefore, 'client credits are untouched');
+  const tAssignee = [imp1, imp2].find((p) => p.id === t.assigneeId)!;
+  ok(tk.out.email.some((e) => e.to === tAssignee.email), 'assigned implementer is emailed');
+  ok(tk.out.email.some((e) => e.to === clientA.email && /support ticket/i.test(e.subject)), 'client gets a receipt');
+  ok(tk.out.slack.some((m) => /High support ticket/.test(m)), 'high-priority ticket is posted to Slack');
+  const low = await wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'question', title: 'How do I export?', description: 'Where is the export button?', priority: 'low' });
+  ok(!low.out.slack.length, 'low-priority ticket does not ping Slack');
+  await throws(wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'nonsense', title: 'x', description: 'y', priority: 'normal' }), 'unknown category is rejected');
+  await throws(wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'broken', title: 'x', description: '', priority: 'normal' }), 'a description is required');
+  await throws(wf.createSupportTicket(db, clientB, { orgId: orgA, category: 'broken', title: 'x', description: 'y', priority: 'normal' }), 'client cannot open a ticket for another company');
+  await throws(wf.createRequest(db, clientA, { orgId: orgA, skuId: 'support', title: 'x', description: '', priority: 'normal' }), 'support cannot be ordered as a paid service');
+  ok((await requestDetail(db, clientB, t.id)) === null, 'other client cannot open the ticket');
+  const other = t.assigneeId === imp1.id ? imp2 : imp1;
+  await wf.start(db, tAssignee, t.id);
+  await throws(wf.submitQa(db, tAssignee, t.id), 'tickets do not go through QA');
+  await throws(wf.resolveTicket(db, tAssignee, t.id, '  '), 'resolving needs a note for the client');
+  await throws(wf.resolveTicket(db, other, t.id, 'fixed'), 'another implementer cannot resolve it');
+  const res = await wf.resolveTicket(db, tAssignee, t.id, 'Reconnected the form to the workflow.');
+  [t] = await db.select().from(schema.requests).where(eq(schema.requests.id, t.id));
+  ok(t.status === 'delivered' && !!t.autoAcceptAt, 'resolved ticket waits for the client to confirm');
+  ok(res.out.email.some((e) => e.to === clientA.email && /resolved/i.test(e.subject)), 'client is emailed that it is resolved');
+  await wf.revise(db, clientA, t.id, 'Still failing on mobile.');
+  [t] = await db.select().from(schema.requests).where(eq(schema.requests.id, t.id));
+  ok(t.status === 'in_progress' && t.revisions === 1, 'client can reopen a ticket that is not fixed');
+  await wf.resolveTicket(db, tAssignee, t.id, 'Fixed the mobile layout too.');
+  await wf.accept(db, clientA, t.id);
+  [t] = await db.select().from(schema.requests).where(eq(schema.requests.id, t.id));
+  ok(t.status === 'closed', 'client confirms the fix and the ticket closes');
+  const orgC = (await wf.saveOrg(db, lead, { name: 'Monday Co', platform: 'Monday', podId: podB.id, plan: 'Starter', monthlyCredits: 5 })).value;
+  const logged = await wf.createSupportTicket(db, csm, { orgId: orgC, category: 'access', title: 'User locked out', description: 'Called in, cannot log in.', priority: 'urgent', contact: 'Sam by phone' });
+  const [tc] = await db.select().from(schema.requests).where(eq(schema.requests.id, logged.value));
+  ok(tc.source === 'Logged by team' && tc.contact === 'Sam by phone' && tc.slaHours === 4, 'CSM can log a ticket for a client, with a 4-hour target for Urgent');
+  ok(tc.assigneeId === impB.id, 'when no one knows the platform, routing falls back to anyone with capacity in the pod');
+  await throws(wf.createSupportTicket(db, imp1, { orgId: orgA, category: 'broken', title: 'x', description: 'y', priority: 'normal' }), 'implementers cannot open tickets on a client\'s behalf')
+
   console.log('\nRow Level Security (direct database access with the public key)');
   const asUser = async <T>(uid: string, q: string): Promise<T[]> => {
     await pg.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${uid}', false);`);
@@ -177,7 +219,8 @@ async function main(): Promise<void> {
   ok((await asUser(clientA.id, 'select * from orgs')).length === 1, 'client reads only its own company record');
   ok((await asUser(lead.id, 'select * from staff_rates')).length === 0, 'lead cannot read pay rates');
   ok((await asUser(owner.id, 'select * from staff_rates')).length === 1, 'owner can read pay rates');
-  ok((await asUser(imp1.id, 'select * from requests')).length === 4, 'staff can read all 4 requests');
+  const total = (await db.select().from(schema.requests)).length;
+  ok((await asUser(imp1.id, 'select * from requests')).length === total, `staff can read all ${total} requests`);
   let blocked = false;
   try { await asUser(clientA.id, `update orgs set credits = 999`); } catch { blocked = true; }
   ok(blocked, 'client cannot write to the database directly');

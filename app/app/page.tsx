@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { getDb } from '@/lib/db';
 import { requireStaff } from '@/lib/auth';
 import { getSettings, lookups, visibleRequests } from '@/lib/queries';
-import { ACTIVE, ROLE_LBL, isCsmRole, isLeadRole, sla } from '@/lib/core';
+import { ACTIVE, ROLE_LBL, isCsmRole, isLeadRole, isSupport, sla } from '@/lib/core';
 import type { Request } from '@/lib/db/schema';
 import { Flash, Head } from '@/components/ui';
 import { StaffList } from '@/components/lists';
@@ -20,13 +20,16 @@ export default async function Queue({ searchParams }: { searchParams: Record<str
   if (v.role === 'owner') {
     out.push(sec('Needs you', open.filter((r) => sla(r, s)?.level === 3), 'Nothing needs you. The line is running.'));
     out.push(sec('Breached SLA', open.filter((r) => sla(r, s)?.level === 2), 'No breaches.'));
+    out.push(sec('Open support tickets', open.filter(isSupport), 'No open support tickets.'));
     out.push(sec('New from clients', open.filter((r) => r.status === 'submitted'), 'No untriaged requests.'));
     out.push(sec('Waiting for assignment', open.filter((r) => r.status === 'scoped'), 'Routing is covering everything.'));
   } else {
+    if (csm) out.push(sec('Support tickets', open.filter((r) => isSupport(r) && r.assigneeId !== v.id), 'No open support tickets.'));
     if (csm) out.push(sec('Triage', open.filter((r) => r.status === 'submitted'), 'No new requests to triage.'));
     if (csm) out.push(sec('Ready to scope', open.filter((r) => r.status === 'triaged'), 'Nothing waiting on scope.'));
     if (csm) out.push(sec('Needs assignment', open.filter((r) => r.status === 'scoped'), 'Routing is covering everything.'));
-    out.push(sec('Your work', open.filter((r) => r.assigneeId === v.id && ['assigned', 'in_progress', 'waiting'].includes(r.status)), 'Nothing assigned to you.'));
+    out.push(sec('Your support tickets', open.filter((r) => isSupport(r) && r.assigneeId === v.id && ['assigned', 'in_progress', 'waiting'].includes(r.status)), 'No support tickets assigned to you.'));
+    out.push(sec('Your work', open.filter((r) => !isSupport(r) && r.assigneeId === v.id && ['assigned', 'in_progress', 'waiting'].includes(r.status)), 'Nothing assigned to you.'));
     out.push(sec('Your QA reviews', open.filter((r) => r.qaId === v.id && r.status === 'qa'), 'No QA reviews waiting.'));
     if (csm) out.push(sec('Waiting on a client answer', open.filter((r) => r.status === 'waiting'), 'No open client questions.'));
     if (csm) out.push(sec('Waiting on client sign-off', open.filter((r) => r.status === 'delivered'), 'Nothing waiting on a client.'));

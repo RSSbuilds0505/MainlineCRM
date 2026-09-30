@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { getDb } from '@/lib/db';
 import { requireLead } from '@/lib/auth';
 import { finance, getSettings, lookups } from '@/lib/queries';
-import { PLATFORMS, ROLE_LBL } from '@/lib/core';
+import { PLATFORMS, ROLE_LBL, isCatalogSku } from '@/lib/core';
 import { emailEnabled } from '@/lib/email';
 import type { Lookup } from '@/lib/queries';
 import type { Profile } from '@/lib/db/schema';
@@ -184,7 +184,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
           ) : null}
           <div className="tw"><table>
             <thead><tr><th>Service</th><th>Platform</th><th className="num">Credits</th><th className="num">Est. hours</th><th className="num">SLA</th><th className="num">QA items</th><th /></tr></thead>
-            <tbody>{[...L.skus.values()].map((k) => (
+            <tbody>{[...L.skus.values()].filter(isCatalogSku).map((k) => (
               <tr key={k.id} className={k.active ? '' : 'muted'}><td><strong>{k.name}</strong>{k.active ? '' : ' (off)'}<div className="small muted">{k.category}</div></td><td>{k.platform}</td>
                 <td className="num">{k.credits}</td><td className="num">{k.estHours}</td><td className="num">{k.slaHours}h</td><td className="num">{k.qa.length}</td><td>{eb('sku', k.id)}</td></tr>
             ))}</tbody>

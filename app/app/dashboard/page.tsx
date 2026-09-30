@@ -5,7 +5,7 @@ import { getDb } from '@/lib/db';
 import { timelogs } from '@/lib/db/schema';
 import { requireLead } from '@/lib/auth';
 import { finance, getSettings, hoursByRequest, lookups, visibleRequests } from '@/lib/queries';
-import { ACTIVE, TZ, sla } from '@/lib/core';
+import { ACTIVE, TZ, isSupport, sla } from '@/lib/core';
 import { openHoursByStaff } from '@/lib/workflow';
 import { Head, hrs, money } from '@/components/ui';
 import { StaffList } from '@/components/lists';
@@ -101,6 +101,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
           <div className="kpi"><b>{pct(fp, finished.length)}</b><span>First-pass QA</span></div>
           <div className="kpi"><b>{used}</b><span>Credits used this month</span></div>
           <div className="kpi"><b>{portalShare}</b><span>Submitted by clients</span></div>
+          <div className="kpi"><b>{open.filter(isSupport).length}</b><span>Open support tickets</span></div>
         </div>
         <div className="grid2 even">
           <section className="panel"><h2>Team load</h2><div className="stack">

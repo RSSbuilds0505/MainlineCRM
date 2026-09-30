@@ -18,6 +18,18 @@ Next.js 14 (App Router) on Vercel · Supabase Auth and Postgres · Drizzle ORM �
 
 Access is enforced three ways: every write goes through `lib/workflow.ts` role checks; every page and API checks the signed-in user server-side; and Postgres Row Level Security blocks anyone holding the public key from reading other companies' data or writing anything directly.
 
+## Support tickets
+
+Clients open tickets from **Get support** in the portal; CSMs, leads and the owner can log one for a client from **Log ticket**.
+Tickets are separate from service requests:
+
+- No credits, no triage and no scoping. The resolution clock starts immediately: Urgent 4, High 8, Normal 16, Low 24 hours (business hours by default).
+- Routing assigns an implementer in the client's pod at once, preferring someone who knows the client's platform. If nobody has capacity, the ticket waits under **Needs assignment** and leads are emailed.
+- No QA step. The implementer marks it resolved with a note; the client confirms the fix or reopens it. Unconfirmed tickets close after 5 days.
+- Urgent and High tickets, and any ticket nobody could take, are posted to Slack.
+
+Under the hood a ticket is a request on the built-in `support` service (hidden from the catalog) with a `category`.
+
 ## Environment variables
 
 See `.env.example`. Required: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL` (Supabase transaction pooler URI), `APP_URL`, `OWNER_EMAIL`, `OWNER_NAME`, `CRON_SECRET`.

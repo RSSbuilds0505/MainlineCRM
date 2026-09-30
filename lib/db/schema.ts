@@ -60,6 +60,8 @@ export const requests = pgTable('requests', {
   num: serial('num').notNull(),
   orgId: uuid('org_id').notNull(),
   skuId: text('sku_id').notNull(),
+  /** Support tickets only: what kind of help the client needs (see SUPPORT_CATEGORIES). */
+  category: text('category'),
   title: text('title').notNull(),
   description: text('description').notNull().default(''),
   priority: priorityEnum('priority').notNull().default('normal'),
