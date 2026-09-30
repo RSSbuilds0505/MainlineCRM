@@ -29,6 +29,13 @@
       "when": 1790736164309,
       "tag": "0003_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790737640154,
+      "tag": "0004_idle_timeouts",
+      "breakpoints": true
     }
   ]
 }
