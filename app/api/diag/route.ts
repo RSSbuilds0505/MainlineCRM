@@ -14,6 +14,18 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const fix = new URL(req.url).searchParams.get('fix') === '1';
   if (new URL(req.url).searchParams.get('storage') === '1') return NextResponse.json(await storageCheck());
+  if (new URL(req.url).searchParams.get('roles') === '1') {
+    const c = postgres(process.env.DATABASE_URL!, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 5 });
+    const out: Record<string, unknown> = {};
+    try {
+      out.who = await c`select current_user, session_user, (select rolsuper from pg_roles where rolname = current_user) as super, (select rolcreaterole from pg_roles where rolname = current_user) as createrole, (select datdba::regrole::text from pg_database where datname = current_database()) as db_owner`;
+      out.roleconfig = await c`select rolname, rolconfig from pg_roles where rolname in (current_user, 'authenticator', 'anon', 'authenticated')`;
+      for (const [k, q] of [['alterRole', `ALTER ROLE ${'"'}postgres${'"'} SET idle_session_timeout = '60s'`], ['alterDb', `ALTER DATABASE postgres SET idle_session_timeout = '60s'`]] as const) {
+        try { await c.unsafe(q); out[k] = 'ok'; } catch (e) { out[k] = String(e); }
+      }
+    } catch (e) { out.error = String(e); } finally { await c.end({ timeout: 2 }).catch(() => undefined); }
+    return NextResponse.json(out);
+  }
   const sql = postgres(process.env.DATABASE_URL!, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 5 });
   const started = Date.now();
   try {
