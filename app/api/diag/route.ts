@@ -7,25 +7,14 @@ export const dynamic = 'force-dynamic';
 /**
  * Database health check, protected by CRON_SECRET. Uses its own short-lived connection so it still
  * answers when the app's shared connection is stuck. POST with ?fix=1 also ends sessions that have
- * sat idle inside an open transaction, or stalled waiting on the client, for more than 60 seconds (they hold locks and stall the app).
+ * sat idle inside an open transaction, or stalled waiting on the client, for more than 60 seconds (they hold locks and stall the app),
+ * and plain idle sessions older than 2 minutes (left behind by sleeping serverless instances; they fill the pooler).
  */
 export async function POST(req: Request): Promise<NextResponse> {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const fix = new URL(req.url).searchParams.get('fix') === '1';
   if (new URL(req.url).searchParams.get('storage') === '1') return NextResponse.json(await storageCheck());
-  if (new URL(req.url).searchParams.get('roles') === '1') {
-    const c = postgres(process.env.DATABASE_URL!, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 5 });
-    const out: Record<string, unknown> = {};
-    try {
-      out.who = await c`select current_user, session_user, (select rolsuper from pg_roles where rolname = current_user) as super, (select rolcreaterole from pg_roles where rolname = current_user) as createrole, (select datdba::regrole::text from pg_database where datname = current_database()) as db_owner`;
-      out.roleconfig = await c`select rolname, rolconfig from pg_roles where rolname in (current_user, 'authenticator', 'anon', 'authenticated')`;
-      for (const [k, q] of [['alterRole', `ALTER ROLE ${'"'}postgres${'"'} SET idle_session_timeout = '60s'`], ['alterDb', `ALTER DATABASE postgres SET idle_session_timeout = '60s'`]] as const) {
-        try { await c.unsafe(q); out[k] = 'ok'; } catch (e) { out[k] = String(e); }
-      }
-    } catch (e) { out.error = String(e); } finally { await c.end({ timeout: 2 }).catch(() => undefined); }
-    return NextResponse.json(out);
-  }
   const sql = postgres(process.env.DATABASE_URL!, { prepare: false, max: 1, connect_timeout: 10, idle_timeout: 5 });
   const started = Date.now();
   try {
@@ -46,7 +35,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         select pid, pg_terminate_backend(pid) as ended from pg_stat_activity
         where datname = current_database() and pid <> pg_backend_pid() and usename = current_user
           and now() - state_change > interval '60 seconds'
-          and (state like 'idle in transaction%' or (state = 'active' and wait_event = 'ClientRead'))`;
+          and (state like 'idle in transaction%' or (state = 'active' and wait_event = 'ClientRead')
+               or (state = 'idle' and now() - state_change > interval '2 minutes'))`;
     }
     const settings = await sql`select name, setting from pg_settings where name in ('idle_in_transaction_session_timeout','statement_timeout','lock_timeout')`;
     return NextResponse.json({ ms: Date.now() - started, before, sessions, locks, ended, settings });
