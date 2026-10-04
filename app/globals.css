@@ -248,3 +248,11 @@ a.lift{position:relative;z-index:1}
   .fchip{min-height:40px}
   td a,dd a{display:inline-block;padding:4px 0}
 }
+/* launch checklist */
+.checklist{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.checklist li{display:flex;gap:12px;align-items:center;padding:10px 12px;border:1px solid var(--rule);border-radius:8px;background:var(--panel)}
+.checklist li .txt{flex:1;min-width:0}
+.checklist .mark{flex:none;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;border:2px solid var(--rule);font-size:13px;font-weight:700}
+.checklist li.done{background:var(--soft)}
+.checklist li.done .mark{background:var(--go);border-color:var(--go);color:#fff}
+.checklist li.done strong{font-weight:500;color:var(--muted)}

@@ -5,6 +5,7 @@ import { requireLead } from '@/lib/auth';
 import { finance, getSettings, lookups } from '@/lib/queries';
 import { PLATFORMS, ROLE_LBL, isCatalogSku } from '@/lib/core';
 import { emailEnabled } from '@/lib/email';
+import { signupsDisabled, slackEnabled } from '@/lib/notify';
 import type { Lookup } from '@/lib/queries';
 import type { Profile } from '@/lib/db/schema';
 import * as A from '@/app/actions';
@@ -48,6 +49,48 @@ function PersonForm({ p, kind, L, rate, owner, viewer }: { p: Profile | null; ki
   );
 }
 
+type Lk = Lookup;
+/** What is left before the team can rely on Mainline. Each item links to where it is fixed. */
+function LaunchChecklist({ L, owner, rates, prices, signupsOff }: { L: Lk; owner: boolean; rates?: Map<string, unknown>; prices?: Map<string, unknown>; signupsOff: boolean | null }): ReactNode {
+  const people = [...L.people.values()].filter((p) => p.active);
+  const staff = people.filter((p) => p.role !== 'client');
+  const impl = staff.filter((p) => p.role === 'implementer');
+  const orgs = [...L.orgs.values()].filter((o) => o.active);
+  const pods = [...L.pods.values()];
+  const items: { done: boolean; label: string; hint: string; href?: string; action?: ReactNode }[] = [
+    { done: signupsOff === true, label: 'Public sign-ups are off', hint: signupsOff === null ? 'Could not check. In Supabase: Authentication, Sign In / Providers, turn off "Allow new users to sign up".' : 'In Supabase: Authentication, Sign In / Providers, turn off "Allow new users to sign up". Only people you add here can then get in.' },
+    { done: emailEnabled(), label: 'Email is connected', hint: 'Assignment, escalation, client-message and sign-in emails. Needs a Resend API key.', action: emailEnabled() ? <form action={A.testEmailAction} className="inline"><Submit className="btn ghost sm">Send me a test email</Submit></form> : null },
+    { done: slackEnabled(), label: 'Slack alerts are connected', hint: 'Urgent tickets, breaches and unassigned work post to your channel. Needs a Slack webhook URL.', action: slackEnabled() ? <form action={A.testSlackAction} className="inline"><Submit className="btn ghost sm">Send a test message</Submit></form> : null },
+    { done: pods.length > 0 && pods.every((p) => !!p.csmId), label: 'Pods have a CSM', hint: pods.length ? `${pods.filter((p) => !p.csmId).length} pod(s) without a CSM.` : 'Create at least one pod.', href: '/app/setup?edit=pod:new#edit' },
+    { done: impl.length > 0, label: 'Implementers added', hint: impl.length ? `${impl.length} implementer(s). Check each one's platforms and weekly hours; routing uses them.` : 'Add the people who do the work. Routing assigns requests to them.', href: '/app/setup?edit=staff:new#edit' },
+    { done: impl.length > 0 && impl.every((p) => !!p.podId), label: 'Every implementer is in a pod', hint: 'Work routes to the client\'s pod first.', href: '#team' },
+    { done: orgs.length > 0 && orgs.every((o) => !!o.podId), label: 'Clients added and assigned to pods', hint: orgs.length ? `${orgs.filter((o) => !o.podId).length} client(s) without a pod.` : 'Add your client accounts with their plan and monthly credits.', href: '/app/setup?edit=org:new#edit' },
+    { done: orgs.length > 0 && orgs.every((o) => people.some((p) => p.role === 'client' && p.orgId === o.id)), label: 'Each client has a portal user', hint: 'So clients can submit requests and support tickets themselves.', href: '/app/setup?edit=contact:new#edit' },
+    ...(owner ? [
+      { done: staff.length > 0 && staff.every((p) => rates?.has(p.id)), label: 'Pay rates set (owner only)', hint: 'Needed for labor cost and margin on the dashboard.', href: '#team' },
+      { done: orgs.length > 0 && orgs.every((o) => prices?.has(o.id)), label: 'Client prices set (owner only)', hint: 'Needed for revenue and margin on the dashboard.', href: '#clients' },
+    ] : []),
+  ];
+  const done = items.filter((i) => i.done).length;
+  return (
+    <section className="panel stack" id="launch">
+      <div className="row" style={{ justifyContent: 'space-between' }}>
+        <h2 style={{ margin: 0 }}>Launch checklist</h2>
+        <span className={`chip ${done === items.length ? 'ok' : 'risk'}`}>{done} of {items.length} done</span>
+      </div>
+      <ul className="checklist">
+        {items.map((i) => (
+          <li key={i.label} className={i.done ? 'done' : ''}>
+            <span className="mark" aria-hidden="true">{i.done ? '\u2713' : ''}</span>
+            <span className="txt">{i.href && !i.done ? <a href={i.href}><strong>{i.label}</strong></a> : <strong>{i.label}</strong>}{i.done ? null : <><br /><span className="small muted">{i.hint}</span></>}</span>
+            {i.action}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export default async function Setup({ searchParams }: { searchParams: Record<string, string | undefined> }): Promise<ReactNode> {
   const v = await requireLead();
   const db = getDb();
@@ -70,8 +113,9 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
       <Flash sp={searchParams} />
       <Head title="Setup" sub="Team, client accounts, portal users, pods, the service catalog and workspace settings." />
       <div className="stack">
+        <LaunchChecklist L={L} owner={owner} rates={fin?.rates} prices={fin?.prices} signupsOff={await signupsDisabled()} />
         <section className="panel stack">
-          <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>Team</h2>{eb('staff', 'new', 'Add team member')}</div>
+          <div className="row" style={{ justifyContent: 'space-between' }} id="team"><h2 style={{ margin: 0 }}>Team</h2>{eb('staff', 'new', 'Add team member')}</div>
           {et === 'staff' ? <PersonForm p={eid === 'new' ? null : L.people.get(eid) ?? null} kind="staff" L={L} rate={fin?.rates.get(eid)} owner={owner} viewer={v} /> : null}
           <div className="tw"><table>
             <thead><tr><th>Name</th><th>Role</th><th>Pod</th><th>Platforms</th><th className="num">Capacity</th>{owner ? <th className="num">Pay rate</th> : null}<th /></tr></thead>
@@ -87,7 +131,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
         </section>
 
         <section className="panel stack">
-          <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>Clients</h2>{eb('org', 'new', 'Add client')}</div>
+          <div className="row" style={{ justifyContent: 'space-between' }} id="clients"><h2 style={{ margin: 0 }}>Clients</h2>{eb('org', 'new', 'Add client')}</div>
           {et === 'org' ? (
             <form action={A.saveOrgAction} className="form panel" id="edit" style={{ borderColor: 'var(--ink)' }}>
               {hb}{org ? <input type="hidden" name="orgId" value={org.id} /> : null}

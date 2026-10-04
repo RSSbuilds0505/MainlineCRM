@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, type DB } from '@/lib/db';
 import { orgs, profiles, requests, type Priority, type Role } from '@/lib/db/schema';
 import { requireViewer } from '@/lib/auth';
-import { deliver } from '@/lib/notify';
+import { deliver, slack as postSlack } from '@/lib/notify';
 import { allow } from '@/lib/ratelimit';
 import { aiTriage } from '@/lib/triage';
 import { llmEnabled } from '@/lib/llm';
@@ -227,6 +227,18 @@ async function attachFromForm(db: DB, v: wf.Viewer, id: string, fd: FormData): P
   }
 }
 
+export async function testEmailAction(): Promise<never> {
+  const v = await requireViewer();
+  if (!isLeadRole(v.role)) redirect('/app');
+  const ok = await sendEmail({ to: v.email, subject: 'Mainline test email', text: `Hi ${v.name.split(' ')[0]},\n\nEmail from Mainline is working. Your team will get assignment, escalation and client-message emails from this address.` });
+  redirect(withFlash('/app/setup', ok ? { ok: `Test email sent to ${v.email}. Check your inbox (and spam, the first time).` } : { err: 'The test email did not send. Check the Resend API key and that the sending domain is verified.' }));
+}
+export async function testSlackAction(): Promise<never> {
+  const v = await requireViewer();
+  if (!isLeadRole(v.role)) redirect('/app');
+  const ok = await postSlack(`test message from ${v.name}. Urgent and High support tickets, breached SLAs and requests nobody could take will post here.`);
+  redirect(withFlash('/app/setup', ok ? { ok: 'Test message posted to Slack.' } : { err: 'Slack did not accept the message. Check the webhook URL.' }));
+}
 export async function submitQaAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.submitQa(db, v, s(fd, 'id')), 'Sent to QA.');
 }
