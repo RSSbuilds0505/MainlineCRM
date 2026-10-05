@@ -6,7 +6,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from './db';
 import {
-  attachments, comments, escalations, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
+  attachments, comments, escalations, notifications, orgPrices, projectPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
   type AiTriage, type Org, type Priority, type Profile, type Request, type Role, type Settings, type Status,
 } from './db/schema';
 import {
@@ -323,7 +323,8 @@ export async function scope(db: DB, v: Viewer, id: string, input: { credits: num
   return tx(db, async (q, out) => {
     const r = await loadRequest(q, v, id);
     must(allowed('scope', r, v));
-    const credits = Math.max(0, Math.round(input.credits)), hours = Math.max(1, Math.round(input.slaHours)), est = Math.max(0, input.estHours);
+    const [account] = await q.select().from(orgs).where(eq(orgs.id, r.orgId));
+    const credits = account?.billingModel === 'project' ? 0 : Math.max(0, Math.round(input.credits)), hours = Math.max(1, Math.round(input.slaHours)), est = Math.max(0, input.estHours);
     const debited = await q.update(orgs).set({ credits: sql`${orgs.credits} - ${credits}` })
       .where(and(eq(orgs.id, r.orgId), sql`${orgs.credits} >= ${credits}`)).returning({ credits: orgs.credits });
     if (!debited.length) {
@@ -709,16 +710,33 @@ export async function deleteTime(db: DB, v: Viewer, timelogId: string): Promise<
 function mustLead(v: Viewer): void { must(isLeadRole(v.role) && v.active, 'Only the owner or a Solutions Lead can change setup.'); }
 function mustOwner(v: Viewer): void { must(v.role === 'owner' && v.active, 'Only the owner can see or change financial data.'); }
 
-export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: string; platform: string; podId: string | null; plan: string; monthlyCredits: number; credits?: number; active?: boolean }): Promise<Result<string>> {
+export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: string; platform: string; podId: string | null; plan: string; monthlyCredits: number; credits?: number; active?: boolean; billingModel?: string; contractedHours?: number; projectRate?: number }): Promise<Result<string>> {
   mustLead(v);
   if (!input.name.trim()) throw new UserError('Enter the client name.');
   return tx(db, async (q) => {
-    const values = { name: input.name.trim(), platform: input.platform, podId: input.podId || null, plan: input.plan || 'Growth', monthlyCredits: Math.max(0, Math.round(input.monthlyCredits)) };
+    const [existing] = input.id ? await q.select().from(orgs).where(eq(orgs.id, input.id)) : [];
+    if (input.id && !existing) throw new UserError('Client not found.');
+    const model = input.billingModel ?? existing?.billingModel ?? 'retainer';
+    const budget = input.contractedHours ?? existing?.contractedHours ?? 0;
+    if (!['retainer', 'project'].includes(model)) throw new UserError('Choose retainer or project billing.');
+    if (!Number.isFinite(budget) || budget < 0 || budget > 1000000 || (model === 'project' && budget <= 0)) throw new UserError('Enter a positive project allocation up to 1,000,000 hours.');
+    if (model !== (existing?.billingModel ?? 'retainer') || budget !== (existing?.contractedHours ?? 0) || input.projectRate !== undefined) mustOwner(v);
+    if (existing && model !== existing.billingModel) {
+      const [history] = await q.select({ id: requests.id }).from(requests).where(eq(requests.orgId, existing.id)).limit(1);
+      if (history) throw new UserError('Create a separate client account for a new billing model when request history exists.');
+    }
+    if (input.projectRate !== undefined && (!Number.isFinite(input.projectRate) || input.projectRate < 0 || input.projectRate > 1000000)) throw new UserError('Enter a valid hourly rate up to $1,000,000.');
+    const values = { name: input.name.trim(), platform: input.platform, podId: input.podId || null, plan: input.plan || 'Growth', billingModel: model, contractedHours: budget, monthlyCredits: model === 'project' ? 0 : Math.max(0, Math.round(input.monthlyCredits)) };
+    const saveRate = async (id: string): Promise<void> => {
+      if (model === 'project' && input.projectRate !== undefined) await q.insert(projectPrices).values({ orgId: id, hourlyRate: Math.round(input.projectRate * 100) / 100 }).onConflictDoUpdate({ target: projectPrices.orgId, set: { hourlyRate: Math.round(input.projectRate * 100) / 100 } });
+    };
     if (input.id) {
-      await q.update(orgs).set({ ...values, credits: Math.max(0, Math.round(input.credits ?? 0)), active: input.active ?? true }).where(eq(orgs.id, input.id));
+      await q.update(orgs).set({ ...values, credits: model === 'project' ? 0 : Math.max(0, Math.round(input.credits ?? 0)), active: input.active ?? true }).where(eq(orgs.id, input.id));
+      await saveRate(input.id);
       return input.id;
     }
     const [o] = await q.insert(orgs).values({ ...values, credits: values.monthlyCredits, creditsPeriod: monthKey() }).returning();
+    await saveRate(o.id);
     return o.id;
   });
 }
@@ -726,6 +744,8 @@ export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: str
 export async function resetCredits(db: DB, v: Viewer, orgId: string): Promise<Result> {
   mustLead(v);
   return tx(db, async (q) => {
+    const [o] = await q.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!o || o.billingModel === 'project') throw new UserError('Monthly credit resets do not apply to project accounts.');
     await q.update(orgs).set({ credits: sql`${orgs.monthlyCredits}`, creditsPeriod: monthKey() }).where(eq(orgs.id, orgId));
   });
 }
@@ -842,7 +862,7 @@ export async function sweep(db: DB, opts: { force?: boolean } = {}): Promise<Res
     }
     if (s.autoReset) {
       const mk = monthKey(new Date(now));
-      const due = orgRows.filter((o: Org) => o.active && o.creditsPeriod !== mk);
+      const due = orgRows.filter((o: Org) => o.active && o.billingModel !== 'project' && o.creditsPeriod !== mk);
       for (const o of due) {
         await q.update(orgs).set({ credits: o.monthlyCredits, creditsPeriod: mk }).where(eq(orgs.id, o.id));
         reset++;

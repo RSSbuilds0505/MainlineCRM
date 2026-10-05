@@ -75,3 +75,7 @@ npm run db:generate # after editing lib/db/schema.ts; also re-embeds migrations 
 Use a separate Supabase and Vercel project for each customer. Follow [the customer installation and acceptance guide](docs/customer-installation.md). Installation branding is configurable with `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_COMPANY_NAME` and `NEXT_PUBLIC_BRAND_ATTRIBUTION`; existing RSS branding remains the default. Rebuild after changing these values.
 
 `npm run check:installation` validates the configuration in a local `.env` without printing credentials. GitHub Actions verifies types, workflows, database setup and the production build on pushes and pull requests. Separate customer installations do not require shared SaaS tenancy; subscription collection is not included.
+
+## RSS pilot and project budgets
+
+See [RSS pilot rollout](docs/rss-pilot-rollout.md) for deployment, migrations, email verification and role instructions. Project accounts track a lifetime hour allocation independently of monthly credits. Hourly rates and project values are Owner-only. After deploying this release, an Owner applies the additive migration at `/app/upgrade`. Set `EMAIL_DELIVERY_VERIFIED=true` only after receiving the verification email.

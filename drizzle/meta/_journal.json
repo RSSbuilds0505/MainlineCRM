@@ -36,6 +36,13 @@
       "when": 1790737640154,
       "tag": "0004_idle_timeouts",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791169200000,
+      "tag": "0005_project_budgets",
+      "breakpoints": true
     }
   ]
 }

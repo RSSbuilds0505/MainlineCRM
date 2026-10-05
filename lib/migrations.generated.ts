@@ -19,5 +19,9 @@ export const MIGRATIONS: { name: string; sql: string }[] = [
   {
     "name": "0004_idle_timeouts",
     "sql": "-- Serverless instances can go to sleep while holding database connections open, which fills the\n-- connection pooler. Have Postgres close sessions for this role that sit idle, so slots free up on their own.\n-- Best effort: skipped quietly if the role is not allowed to change its own defaults.\nDO $$\nBEGIN\n  EXECUTE format('ALTER ROLE %I SET idle_session_timeout = %L', current_user, '60s');\n  EXECUTE format('ALTER ROLE %I SET idle_in_transaction_session_timeout = %L', current_user, '60s');\nEXCEPTION WHEN OTHERS THEN\n  RAISE NOTICE 'Could not set idle timeouts: %', SQLERRM;\nEND $$;\n"
+  },
+  {
+    "name": "0005_project_budgets",
+    "sql": "-- Additive only: existing accounts remain retainers and retain all credits/history.\nALTER TABLE public.orgs ADD COLUMN billing_model text NOT NULL DEFAULT 'retainer';\n--> statement-breakpoint\nALTER TABLE public.orgs ADD COLUMN contracted_hours numeric NOT NULL DEFAULT 0;\n--> statement-breakpoint\nALTER TABLE public.orgs ADD CONSTRAINT orgs_billing_model_check CHECK (billing_model IN ('retainer', 'project'));\n--> statement-breakpoint\nALTER TABLE public.orgs ADD CONSTRAINT orgs_contracted_hours_check CHECK (contracted_hours >= 0 AND contracted_hours <= 1000000);\n--> statement-breakpoint\nCREATE TABLE public.project_prices (org_id uuid PRIMARY KEY REFERENCES public.orgs(id), hourly_rate numeric NOT NULL CHECK (hourly_rate >= 0 AND hourly_rate <= 1000000));\n--> statement-breakpoint\nALTER TABLE public.project_prices ENABLE ROW LEVEL SECURITY;\n--> statement-breakpoint\nREVOKE ALL ON public.project_prices FROM anon, authenticated;\n--> statement-breakpoint\nGRANT SELECT ON public.project_prices TO authenticated;\n--> statement-breakpoint\nCREATE POLICY project_prices_read ON public.project_prices FOR SELECT TO authenticated USING (public.viewer_role() = 'owner');\n"
   }
 ];

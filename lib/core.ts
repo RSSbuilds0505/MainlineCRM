@@ -82,7 +82,7 @@ export const clientStatus = (r: Pick<Request, 'skuId' | 'status'>): string => (i
 /** Minimum length for account passwords. */
 export const MIN_PASSWORD = 10;
 
-export const PLATFORMS = ['HubSpot', 'Salesforce', 'Monday', 'GoHighLevel'] as const;
+export const PLATFORMS = ['HubSpot', 'Salesforce', 'Monday', 'GoHighLevel', 'LeadSquared'] as const;
 export const SOURCES = ['Email', 'Phone call', 'Slack', 'Meeting', 'Text message', 'Other'] as const;
 
 export const isStaffRole = (r: Role | null | undefined): boolean => !!r && r !== 'client';
