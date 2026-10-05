@@ -3,7 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 import type { DB } from './db';
 import {
   attachments,
-  comments, notifications, orgPrices, projectPrices, orgs, pods, profiles, requestEvents, requests, skus, staffRates, timelogs,
+  comments, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, skus, staffRates, timelogs,
   type Org, type Pod, type Profile, type Request, type Sku, type Timelog,
 } from './db/schema';
 import { isLeadRole } from './core';
@@ -75,8 +75,8 @@ export async function timeRows(db: DB, v: Profile, from: string, to: string, who
 
 export async function finance(db: DB, v: Profile) {
   if (v.role !== 'owner') return null;
-  const [rates, prices, projects] = await Promise.all([db.select().from(staffRates), db.select().from(orgPrices), db.select().from(projectPrices)]);
-  return { projects: new Map(projects.map((p) => [p.orgId, p.hourlyRate])), rates: new Map(rates.map((r) => [r.profileId, r.hourlyRate])), prices: new Map(prices.map((p) => [p.orgId, p.monthlyPrice])) };
+  const [rates, prices] = await Promise.all([db.select().from(staffRates), db.select().from(orgPrices)]);
+  return { rates: new Map(rates.map((r) => [r.profileId, r.hourlyRate])), prices: new Map(prices.map((p) => [p.orgId, p.monthlyPrice])) };
 }
 
 export { getSettings };

@@ -35,8 +35,6 @@ export const orgs = pgTable('orgs', {
   platform: text('platform').notNull(),
   podId: uuid('pod_id'),
   plan: text('plan').notNull().default('Growth'),
-  billingModel: text('billing_model').notNull().default('retainer'),
-  contractedHours: numeric('contracted_hours', { mode: 'number' }).notNull().default(0),
   monthlyCredits: integer('monthly_credits').notNull().default(0),
   credits: integer('credits').notNull().default(0),
   creditsPeriod: text('credits_period'),
@@ -187,12 +185,6 @@ export const staffRates = pgTable('staff_rates', {
 export const orgPrices = pgTable('org_prices', {
   orgId: uuid('org_id').primaryKey(),
   monthlyPrice: numeric('monthly_price', { mode: 'number' }).notNull(),
-});
-
-/** Owner-only project pricing. Operational hours live on the client account. */
-export const projectPrices = pgTable('project_prices', {
-  orgId: uuid('org_id').primaryKey().references(() => orgs.id),
-  hourlyRate: numeric('hourly_rate', { mode: 'number' }).notNull(),
 });
 
 /** Fixed-window rate limiter used by login links and AI triage. */

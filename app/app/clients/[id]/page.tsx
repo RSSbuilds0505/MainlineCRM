@@ -6,8 +6,6 @@ import { requireStaff } from '@/lib/auth';
 import { getSettings, lookups, visibleRequests } from '@/lib/queries';
 import { ACTIVE, isCsmRole, isLeadRole, isSupport } from '@/lib/core';
 import { Head, fmtWhen, initials } from '@/components/ui';
-import { ProjectBudget } from '@/components/project-budget';
-import { projectSummary } from '@/lib/projects';
 import { StaffList } from '@/components/lists';
 
 /** One client account: who they are, who serves them, and everything open or recently finished, with quick actions. */
@@ -18,7 +16,6 @@ export default async function ClientPage({ params }: { params: { id: string } })
   const [L, s, rs] = await Promise.all([lookups(db), getSettings(db), visibleRequests(db, v)]);
   const org = L.orgs.get(params.id);
   if (!org || (!isLeadRole(v.role) && org.podId !== v.podId)) notFound();
-  const budget = await projectSummary(db, v, org.id);
   const mine = rs.filter((r) => r.orgId === org.id);
   const open = mine.filter((r) => ACTIVE.includes(r.status));
   const done = mine.filter((r) => !ACTIVE.includes(r.status)).sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt)).slice(0, 10);
@@ -42,11 +39,10 @@ export default async function ClientPage({ params }: { params: { id: string } })
           {isCsmRole(v.role) ? <Link className="btn sig" href={`/app/new?org=${org.id}`}>New request</Link> : null}
         </div>
       </Head>
-      <ProjectBudget summary={budget} />
       <div className="kpis" style={{ marginBottom: 14 }}>
         <Link className="kpi link" href={`/app/board?org=${org.id}`}><b>{open.length}</b><span>Open, view on board</span></Link>
         <Link className="kpi link" href={`/app/board?org=${org.id}&kind=support`}><b>{open.filter(isSupport).length}</b><span>Open support tickets</span></Link>
-        {org.billingModel !== 'project' ? <div className="kpi"><b>{org.credits}</b><span>of {org.monthlyCredits} credits left</span><div className={`meter ${pct < 20 ? 'hot' : pct < 40 ? 'warm' : ''}`} style={{ marginTop: 8 }}><i style={{ width: `${pct}%` }} /></div></div> : null}
+        <div className="kpi"><b>{org.credits}</b><span>of {org.monthlyCredits} credits left</span><div className={`meter ${pct < 20 ? 'hot' : pct < 40 ? 'warm' : ''}`} style={{ marginTop: 8 }}><i style={{ width: `${pct}%` }} /></div></div>
         <div className="kpi"><b>{mine.reduce((t, r) => t + r.revisions, 0)}</b><span>Revisions and reopens</span></div>
       </div>
       <div className="grid2">

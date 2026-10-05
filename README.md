@@ -76,6 +76,6 @@ Use a separate Supabase and Vercel project for each customer. Follow [the custom
 
 `npm run check:installation` validates the configuration in a local `.env` without printing credentials. GitHub Actions verifies types, workflows, database setup and the production build on pushes and pull requests. Separate customer installations do not require shared SaaS tenancy; subscription collection is not included.
 
-## RSS pilot and project budgets
+## Project release staging
 
-See [RSS pilot rollout](docs/rss-pilot-rollout.md) for deployment, migrations, email verification and role instructions. Project accounts track a lifetime hour allocation independently of monthly credits. Hourly rates and project values are Owner-only. After deploying this release, an Owner applies the additive migration at `/app/upgrade`. Set `EMAIL_DELIVERY_VERIFIED=true` only after receiving the verification email.
+The tested project-budget release is preserved on `codex/rss-pilot` (PR #1). Production currently retains the preceding working application with an Owner-only migration page at `/app/upgrade`. Apply the bundled additive migration there, verify success, then deploy the project release. This staged version does not yet expose project budgeting. See [rollout instructions](docs/rss-pilot-rollout.md) for the full release and remaining launch checks.

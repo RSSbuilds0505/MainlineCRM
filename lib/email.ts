@@ -8,12 +8,10 @@ function resend(): Resend | null {
   return client;
 }
 
-export const emailConfigured = (): boolean => !!process.env.RESEND_API_KEY && !!process.env.EMAIL_FROM;
-export const emailEnabled = (): boolean => emailConfigured() && process.env.EMAIL_DELIVERY_VERIFIED === 'true';
+export const emailEnabled = (): boolean => !!process.env.RESEND_API_KEY;
 
 /** The single path for transactional email. Never throws: a failed email must not fail the user's action. */
-export async function sendEmail(msg: { to: string; subject: string; text: string; verification?: boolean }): Promise<boolean> {
-  if (!emailConfigured() || (!msg.verification && !emailEnabled())) return false;
+export async function sendEmail(msg: { to: string; subject: string; text: string }): Promise<boolean> {
   const r = resend();
   if (!r) return false;
   try {

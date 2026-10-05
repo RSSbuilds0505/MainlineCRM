@@ -20,7 +20,7 @@ export default async function Services(): Promise<ReactNode> {
         {skus.map((k) => (
           <Link key={k.id} className="sku" href={`/portal/new?sku=${k.id}#nr`}>
             <span className="nm">{k.name}</span><span className="d">{k.description}</span>
-            <span className="k"><span>{org.billingModel === 'project' ? `${k.estHours} estimated hours` : k.credits ? `${k.credits} credits` : 'Quoted after scoping'}</span><span className="go">Request this</span></span>
+            <span className="k"><span>{k.credits ? `${k.credits} credits` : 'Quoted after scoping'}</span><span className="go">Request this</span></span>
           </Link>
         ))}
       </div>

@@ -5,7 +5,7 @@ import { createRequestAction } from '@/app/actions';
 import { AiSuggest, Submit } from './client';
 import { AttachBox } from './attach';
 
-export function ClientRequestForm({ skus, aiOn, preselect, project = false }: { skus: Sku[]; aiOn: boolean; preselect?: string; project?: boolean }): ReactNode {
+export function ClientRequestForm({ skus, aiOn, preselect }: { skus: Sku[]; aiOn: boolean; preselect?: string }): ReactNode {
   const groups = new Map<string, Sku[]>();
   for (const k of skus) groups.set(k.category, [...(groups.get(k.category) ?? []), k]);
   return (
@@ -33,7 +33,7 @@ export function ClientRequestForm({ skus, aiOn, preselect, project = false }: { 
                 <input type="radio" name="skuId" value={k.id} required defaultChecked={k.id === preselect} />
                 <span className="nm">{k.name}</span>
                 <span className="d">{k.description}</span>
-                <span className="k"><span>{project ? `${k.estHours} estimated hours` : k.credits ? `${k.credits} credits` : 'Quoted after scoping'}</span><span>{k.platform}</span></span>
+                <span className="k"><span>{k.credits ? `${k.credits} credits` : 'Quoted after scoping'}</span><span>{k.platform}</span></span>
               </label>
             ))}
           </div>
@@ -57,7 +57,7 @@ export function StaffRequestForm({ orgs, org, skus, aiOn, canTriage }: { orgs: O
       <form id="nr" action={createRequestAction} className="panel form">
         <input type="hidden" name="back" value="/app/new" />
         <input type="hidden" name="orgId" value={org.id} />
-        <p className="small muted" style={{ margin: 0 }}>Logging for <strong>{org.name}</strong> on {org.platform}, {org.billingModel === 'project' ? `${org.contractedHours} total project hours` : `${org.credits} credits left`}.</p>
+        <p className="small muted" style={{ margin: 0 }}>Logging for <strong>{org.name}</strong> on {org.platform}, {org.credits} credits left.</p>
         <div className="two">
           <label className="f">Came in by<select name="source" defaultValue="Email">{SOURCES.map((x) => <option key={x}>{x}</option>)}</select></label>
           <label className="f">Client contact who asked<input type="text" name="contact" maxLength={120} /></label>
@@ -68,7 +68,7 @@ export function StaffRequestForm({ orgs, org, skus, aiOn, canTriage }: { orgs: O
         {aiOn ? <AiSuggest formId="nr" orgField="orgId" /> : null}
         <div className="two">
           <label className="f">Service
-            <select name="skuId" required defaultValue=""><option value="" disabled>Pick a service</option>{skus.map((k) => <option key={k.id} value={k.id}>{k.name} ({org.billingModel === 'project' ? `${k.estHours} est. hours` : `${k.credits} cr`})</option>)}</select>
+            <select name="skuId" required defaultValue=""><option value="" disabled>Pick a service</option>{skus.map((k) => <option key={k.id} value={k.id}>{k.name} ({k.credits} cr)</option>)}</select>
           </label>
           <label className="f">Priority
             <select name="priority" defaultValue="normal">{(Object.keys(PRI) as (keyof typeof PRI)[]).map((k) => <option key={k} value={k}>{PRI[k].label}</option>)}</select>

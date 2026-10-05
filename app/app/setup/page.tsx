@@ -4,7 +4,7 @@ import { getDb } from '@/lib/db';
 import { requireLead } from '@/lib/auth';
 import { finance, getSettings, lookups } from '@/lib/queries';
 import { PLATFORMS, ROLE_LBL, isCatalogSku } from '@/lib/core';
-import { emailEnabled, emailConfigured } from '@/lib/email';
+import { emailEnabled } from '@/lib/email';
 import { signupsDisabled, slackEnabled } from '@/lib/notify';
 import type { Lookup } from '@/lib/queries';
 import type { Profile } from '@/lib/db/schema';
@@ -51,7 +51,7 @@ function PersonForm({ p, kind, L, rate, owner, viewer }: { p: Profile | null; ki
 
 type Lk = Lookup;
 /** What is left before the team can rely on Mainline. Each item links to where it is fixed. */
-function LaunchChecklist({ L, owner, rates, prices, projects, signupsOff }: { L: Lk; owner: boolean; rates?: Map<string, unknown>; prices?: Map<string, unknown>; projects?: Map<string, unknown>; signupsOff: boolean | null }): ReactNode {
+function LaunchChecklist({ L, owner, rates, prices, signupsOff }: { L: Lk; owner: boolean; rates?: Map<string, unknown>; prices?: Map<string, unknown>; signupsOff: boolean | null }): ReactNode {
   const people = [...L.people.values()].filter((p) => p.active);
   const staff = people.filter((p) => p.role !== 'client');
   const impl = staff.filter((p) => p.role === 'implementer');
@@ -59,7 +59,7 @@ function LaunchChecklist({ L, owner, rates, prices, projects, signupsOff }: { L:
   const pods = [...L.pods.values()];
   const items: { done: boolean; label: string; hint: string; href?: string; action?: ReactNode }[] = [
     { done: signupsOff === true, label: 'Public sign-ups are off', hint: signupsOff === null ? 'Could not check. In Supabase: Authentication, Sign In / Providers, turn off "Allow new users to sign up".' : 'In Supabase: Authentication, Sign In / Providers, turn off "Allow new users to sign up". Only people you add here can then get in.' },
-    { done: emailEnabled(), label: 'Email is connected', hint: 'Assignment, escalation, client-message and sign-in emails. Connect a verified sender, send a test and confirm delivery before enabling email.', action: emailConfigured() ? <form action={A.testEmailAction} className="inline"><Submit className="btn ghost sm">Send a verification email</Submit></form> : null },
+    { done: emailEnabled(), label: 'Email is connected', hint: 'Assignment, escalation, client-message and sign-in emails. Needs a Resend API key.', action: emailEnabled() ? <form action={A.testEmailAction} className="inline"><Submit className="btn ghost sm">Send me a test email</Submit></form> : null },
     { done: slackEnabled(), label: 'Slack alerts are connected', hint: 'Urgent tickets, breaches and unassigned work post to your channel. Needs a Slack webhook URL.', action: slackEnabled() ? <form action={A.testSlackAction} className="inline"><Submit className="btn ghost sm">Send a test message</Submit></form> : null },
     { done: pods.length > 0 && pods.every((p) => !!p.csmId), label: 'Pods have a CSM', hint: pods.length ? `${pods.filter((p) => !p.csmId).length} pod(s) without a CSM.` : 'Create at least one pod.', href: '/app/setup?edit=pod:new#edit' },
     { done: impl.length > 0, label: 'Implementers added', hint: impl.length ? `${impl.length} implementer(s). Check each one's platforms and weekly hours; routing uses them.` : 'Add the people who do the work. Routing assigns requests to them.', href: '/app/setup?edit=staff:new#edit' },
@@ -68,7 +68,7 @@ function LaunchChecklist({ L, owner, rates, prices, projects, signupsOff }: { L:
     { done: orgs.length > 0 && orgs.every((o) => people.some((p) => p.role === 'client' && p.orgId === o.id)), label: 'Each client has a portal user', hint: 'So clients can submit requests and support tickets themselves.', href: '/app/setup?edit=contact:new#edit' },
     ...(owner ? [
       { done: staff.length > 0 && staff.every((p) => rates?.has(p.id)), label: 'Pay rates set (owner only)', hint: 'Needed for labor cost and margin on the dashboard.', href: '#team' },
-      { done: orgs.length > 0 && orgs.every((o) => o.billingModel === 'project' ? projects?.has(o.id) : prices?.has(o.id)), label: 'Client prices set (owner only)', hint: 'Needed for revenue and margin on the dashboard.', href: '#clients' },
+      { done: orgs.length > 0 && orgs.every((o) => prices?.has(o.id)), label: 'Client prices set (owner only)', hint: 'Needed for revenue and margin on the dashboard.', href: '#clients' },
     ] : []),
   ];
   const done = items.filter((i) => i.done).length;
@@ -113,7 +113,7 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
       <Flash sp={searchParams} />
       <Head title="Setup" sub="Team, client accounts, portal users, pods, the service catalog and workspace settings." />
       <div className="stack">
-        <LaunchChecklist L={L} owner={owner} rates={fin?.rates} prices={fin?.prices} projects={fin?.projects} signupsOff={await signupsDisabled()} />
+        <LaunchChecklist L={L} owner={owner} rates={fin?.rates} prices={fin?.prices} signupsOff={await signupsDisabled()} />
         <section className="panel stack">
           <div className="row" style={{ justifyContent: 'space-between' }} id="team"><h2 style={{ margin: 0 }}>Team</h2>{eb('staff', 'new', 'Add team member')}</div>
           {et === 'staff' ? <PersonForm p={eid === 'new' ? null : L.people.get(eid) ?? null} kind="staff" L={L} rate={fin?.rates.get(eid)} owner={owner} viewer={v} /> : null}
@@ -141,14 +141,8 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
                 <label className="f">Platform<select name="platform" defaultValue={org?.platform ?? 'HubSpot'}>{PLATFORMS.map((x) => <option key={x}>{x}</option>)}</select></label>
                 <label className="f">Pod<select name="podId" defaultValue={org?.podId ?? ''}><option value="">No pod</option>{[...L.pods.values()].map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select></label>
               </div>
-              {owner ? <div className="three">
-                <label className="f">Billing model<select name="billingModel" defaultValue={org?.billingModel ?? 'retainer'}><option value="retainer">Monthly retainer</option><option value="project">Project hours</option></select></label>
-                <label className="f">Total project hours<input type="number" name="contractedHours" min={0} max={1000000} step={0.25} defaultValue={org?.contractedHours ?? 0}/></label>
-                <label className="f">Project hourly rate, $ (owner only)<input type="number" name="projectRate" min={0} max={1000000} step={0.01} defaultValue={org ? fin?.projects.get(org.id) ?? '' : ''}/></label>
-              </div> : org?.billingModel === 'project' ? <p>Total project allocation: {org.contractedHours} hours. Only the owner changes contract terms.</p> : null}
-              <p className="small muted">Project accounts use total logged hours, not monthly credits or monthly pricing. One project allocation per client account; use a separate account for a later contract.</p>
               <div className="three">
-                <label className="f">Plan<select name="plan" defaultValue={org?.plan ?? 'Growth'}>{['Starter', 'Growth', 'Scale', 'Custom', 'Project'].map((x) => <option key={x}>{x}</option>)}</select></label>
+                <label className="f">Plan<select name="plan" defaultValue={org?.plan ?? 'Growth'}>{['Starter', 'Growth', 'Scale', 'Custom'].map((x) => <option key={x}>{x}</option>)}</select></label>
                 <label className="f">Monthly credits<input type="number" name="monthlyCredits" min={0} defaultValue={org?.monthlyCredits ?? 35} /></label>
                 {org ? <label className="f">Credits left now<input type="number" name="credits" min={0} defaultValue={org.credits} /></label> : <div />}
               </div>
@@ -164,9 +158,9 @@ export default async function Setup({ searchParams }: { searchParams: Record<str
             <tbody>{orgList.map((o) => (
               <tr key={o.id} className={o.active ? '' : 'muted'}>
                 <td><Link href={`/app/clients/${o.id}`}>{o.name}</Link>{o.active ? '' : ' (inactive)'}</td><td>{o.platform}</td><td>{L.pods.get(o.podId ?? '')?.name ?? 'None'}</td><td>{o.plan}</td>
-                {owner ? <td className="num">{o.billingModel === 'project' ? (fin?.projects.has(o.id) ? `${money(Number(fin.projects.get(o.id)))}/h` : 'Not set') : (fin?.prices.has(o.id) ? money(Number(fin.prices.get(o.id))) : 'Not set')}</td> : null}
-                <td className="num">{o.billingModel === 'project' ? `${o.contractedHours} project hours` : `${o.credits} / ${o.monthlyCredits}`}</td>
-                <td><div className="row" style={{ flexWrap: 'nowrap' }}>{eb('org', o.id)}{o.billingModel !== 'project' ? <form action={A.resetCreditsAction} className="inline"><input type="hidden" name="orgId" value={o.id} />{hb}<Submit className="btn ghost sm" confirmText={`Reset ${o.name} to ${o.monthlyCredits} credits?`}>Reset credits</Submit></form> : null}</div></td>
+                {owner ? <td className="num">{fin?.prices.get(o.id) ? money(Number(fin.prices.get(o.id))) : 'Not set'}</td> : null}
+                <td className="num">{o.credits} / {o.monthlyCredits}</td>
+                <td><div className="row" style={{ flexWrap: 'nowrap' }}>{eb('org', o.id)}<form action={A.resetCreditsAction} className="inline"><input type="hidden" name="orgId" value={o.id} />{hb}<Submit className="btn ghost sm" confirmText={`Reset ${o.name} to ${o.monthlyCredits} credits?`}>Reset credits</Submit></form></div></td>
               </tr>
             ))}</tbody>
           </table></div>

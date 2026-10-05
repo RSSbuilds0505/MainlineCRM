@@ -231,9 +231,8 @@ async function attachFromForm(db: DB, v: wf.Viewer, id: string, fd: FormData): P
 export async function testEmailAction(): Promise<never> {
   const v = await requireViewer();
   if (!isLeadRole(v.role)) redirect('/app');
-  const to = v.role === 'owner' ? (process.env.EMAIL_TEST_TO || v.email) : v.email;
-  const ok = await sendEmail({ verification: true, to, subject: 'Mainline test email', text: `Hi ${v.name.split(' ')[0]},\n\nEmail from Mainline is working. Your team will get assignment, escalation and client-message emails from this address.` });
-  redirect(withFlash('/app/setup', ok ? { ok: `Verification email accepted for ${to}. Confirm receipt before enabling notifications.` } : { err: 'The test email did not send. Check the Resend API key and that the sending domain is verified.' }));
+  const ok = await sendEmail({ to: v.email, subject: 'Mainline test email', text: `Hi ${v.name.split(' ')[0]},\n\nEmail from Mainline is working. Your team will get assignment, escalation and client-message emails from this address.` });
+  redirect(withFlash('/app/setup', ok ? { ok: `Test email sent to ${v.email}. Check your inbox (and spam, the first time).` } : { err: 'The test email did not send. Check the Resend API key and that the sending domain is verified.' }));
 }
 export async function testSlackAction(): Promise<never> {
   const v = await requireViewer();
@@ -336,11 +335,9 @@ export async function saveOrgAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app/setup'), async (db, v) => {
     const res = await wf.saveOrg(db, v, {
       id: s(fd, 'orgId') || undefined, name: s(fd, 'name'), platform: s(fd, 'platform'), podId: s(fd, 'podId') || null,
-      billingModel: s(fd, 'billingModel') || undefined, contractedHours: s(fd, 'contractedHours') === '' ? undefined : Number(s(fd, 'contractedHours')), projectRate: s(fd, 'projectRate') === '' ? undefined : Number(s(fd, 'projectRate')),
       plan: s(fd, 'plan'), monthlyCredits: n(fd, 'monthlyCredits'), credits: n(fd, 'credits'), active: s(fd, 'orgId') ? b(fd, 'active') : true,
     });
-    const [account] = await db.select({ billingModel: orgs.billingModel }).from(orgs).where(eq(orgs.id, res.value));
-    if (v.role === 'owner' && account?.billingModel !== 'project' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
+    if (v.role === 'owner' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
     return res;
   }, 'Client saved.');
 }

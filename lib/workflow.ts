@@ -6,7 +6,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DB } from './db';
 import {
-  attachments, comments, escalations, notifications, orgPrices, projectPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
+  attachments, comments, escalations, notifications, orgPrices, orgs, pods, profiles, requestEvents, requests, settings, skus, staffRates, timelogs,
   type AiTriage, type Org, type Priority, type Profile, type Request, type Role, type Settings, type Status,
 } from './db/schema';
 import {
@@ -323,8 +323,7 @@ export async function scope(db: DB, v: Viewer, id: string, input: { credits: num
   return tx(db, async (q, out) => {
     const r = await loadRequest(q, v, id);
     must(allowed('scope', r, v));
-    const [account] = await q.select().from(orgs).where(eq(orgs.id, r.orgId));
-    const credits = account?.billingModel === 'project' ? 0 : Math.max(0, Math.round(input.credits)), hours = Math.max(1, Math.round(input.slaHours)), est = Math.max(0, input.estHours);
+    const credits = Math.max(0, Math.round(input.credits)), hours = Math.max(1, Math.round(input.slaHours)), est = Math.max(0, input.estHours);
     const debited = await q.update(orgs).set({ credits: sql`${orgs.credits} - ${credits}` })
       .where(and(eq(orgs.id, r.orgId), sql`${orgs.credits} >= ${credits}`)).returning({ credits: orgs.credits });
     if (!debited.length) {
@@ -333,22 +332,21 @@ export async function scope(db: DB, v: Viewer, id: string, input: { credits: num
     }
     const now = new Date();
     const rt = await routeFor(q, r);
-    const allocation = account?.billingModel === 'project' ? 'project hours (no monthly credits)' : `${credits} credits`;
     const base: Partial<Request> = { credits, slaHours: hours, estHours: est, scopedAt: now, pausedBizMs: 0 };
     const [org] = await q.select().from(orgs).where(eq(orgs.id, r.orgId));
     if (rt.assigneeId) {
       await patch(q, r, { ...base, status: 'assigned', assigneeId: rt.assigneeId, qaId: rt.qaId, needsLead: false });
       const names = await q.select({ id: profiles.id, name: profiles.name }).from(profiles).where(inArray(profiles.id, [rt.assigneeId, rt.qaId ?? rt.assigneeId]));
       const nm = (x: string | null): string => names.find((n) => n.id === x)?.name ?? 'Unassigned';
-      await event(q, v, r, 'status', `Scoped against ${allocation}, ${hours} ${clockWord(s)} SLA. Routed to ${nm(rt.assigneeId)}, QA by ${nm(rt.qaId)}. ${rt.reason}`.trim(), 'triaged', 'assigned');
+      await event(q, v, r, 'status', `Scoped at ${credits} credits, ${hours} ${clockWord(s)} SLA. Routed to ${nm(rt.assigneeId)}, QA by ${nm(rt.qaId)}. ${rt.reason}`.trim(), 'triaged', 'assigned');
       await notifyStaff(q, out, v, [rt.assigneeId], `Assigned to you: ${ref(r)} for ${org?.name ?? 'a client'}, due in ${hours} ${clockWord(s)}`, r, 'assigned', true);
       await notifyStaff(q, out, v, [rt.qaId], `You are QA reviewer on ${ref(r)}`, r, 'qa-assigned');
     } else {
       await patch(q, r, { ...base, status: 'scoped', needsLead: true });
-      await event(q, v, r, 'status', `Scoped against ${allocation}. Routing found no one: ${rt.reason}`, 'triaged', 'scoped');
+      await event(q, v, r, 'status', `Scoped at ${credits} credits. Routing found no one: ${rt.reason}`, 'triaged', 'scoped');
       await notifyStaff(q, out, v, await leadIds(q), `Needs assignment: no one with capacity for ${ref(r)}`, r, 'needs-lead', true);
     }
-    await notifyClient(q, out, v, r.orgId, `ML-${r.num} is scheduled`, `"${r.title}" is scoped against ${allocation} and scheduled with your team. Target turnaround: ${hours} ${clockWord(s)}.`, r);
+    await notifyClient(q, out, v, r.orgId, `ML-${r.num} is scheduled`, `"${r.title}" is scoped at ${credits} credits and scheduled with your team. Target turnaround: ${hours} ${clockWord(s)}.`, r);
   });
 }
 
@@ -711,33 +709,16 @@ export async function deleteTime(db: DB, v: Viewer, timelogId: string): Promise<
 function mustLead(v: Viewer): void { must(isLeadRole(v.role) && v.active, 'Only the owner or a Solutions Lead can change setup.'); }
 function mustOwner(v: Viewer): void { must(v.role === 'owner' && v.active, 'Only the owner can see or change financial data.'); }
 
-export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: string; platform: string; podId: string | null; plan: string; monthlyCredits: number; credits?: number; active?: boolean; billingModel?: string; contractedHours?: number; projectRate?: number }): Promise<Result<string>> {
+export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: string; platform: string; podId: string | null; plan: string; monthlyCredits: number; credits?: number; active?: boolean }): Promise<Result<string>> {
   mustLead(v);
   if (!input.name.trim()) throw new UserError('Enter the client name.');
   return tx(db, async (q) => {
-    const [existing] = input.id ? await q.select().from(orgs).where(eq(orgs.id, input.id)) : [];
-    if (input.id && !existing) throw new UserError('Client not found.');
-    const model = input.billingModel ?? existing?.billingModel ?? 'retainer';
-    const budget = input.contractedHours ?? existing?.contractedHours ?? 0;
-    if (!['retainer', 'project'].includes(model)) throw new UserError('Choose retainer or project billing.');
-    if (!Number.isFinite(budget) || budget < 0 || budget > 1000000 || (model === 'project' && budget <= 0)) throw new UserError('Enter a positive project allocation up to 1,000,000 hours.');
-    if (model !== (existing?.billingModel ?? 'retainer') || budget !== (existing?.contractedHours ?? 0) || input.projectRate !== undefined) mustOwner(v);
-    if (existing && model !== existing.billingModel) {
-      const [history] = await q.select({ id: requests.id }).from(requests).where(eq(requests.orgId, existing.id)).limit(1);
-      if (history) throw new UserError('Create a separate client account for a new billing model when request history exists.');
-    }
-    if (input.projectRate !== undefined && (!Number.isFinite(input.projectRate) || input.projectRate < 0 || input.projectRate > 1000000)) throw new UserError('Enter a valid hourly rate up to $1,000,000.');
-    const values = { name: input.name.trim(), platform: input.platform, podId: input.podId || null, plan: input.plan || 'Growth', billingModel: model, contractedHours: budget, monthlyCredits: model === 'project' ? 0 : Math.max(0, Math.round(input.monthlyCredits)) };
-    const saveRate = async (id: string): Promise<void> => {
-      if (model === 'project' && input.projectRate !== undefined) await q.insert(projectPrices).values({ orgId: id, hourlyRate: Math.round(input.projectRate * 100) / 100 }).onConflictDoUpdate({ target: projectPrices.orgId, set: { hourlyRate: Math.round(input.projectRate * 100) / 100 } });
-    };
+    const values = { name: input.name.trim(), platform: input.platform, podId: input.podId || null, plan: input.plan || 'Growth', monthlyCredits: Math.max(0, Math.round(input.monthlyCredits)) };
     if (input.id) {
-      await q.update(orgs).set({ ...values, credits: model === 'project' ? 0 : Math.max(0, Math.round(input.credits ?? 0)), active: input.active ?? true }).where(eq(orgs.id, input.id));
-      await saveRate(input.id);
+      await q.update(orgs).set({ ...values, credits: Math.max(0, Math.round(input.credits ?? 0)), active: input.active ?? true }).where(eq(orgs.id, input.id));
       return input.id;
     }
     const [o] = await q.insert(orgs).values({ ...values, credits: values.monthlyCredits, creditsPeriod: monthKey() }).returning();
-    await saveRate(o.id);
     return o.id;
   });
 }
@@ -745,8 +726,6 @@ export async function saveOrg(db: DB, v: Viewer, input: { id?: string; name: str
 export async function resetCredits(db: DB, v: Viewer, orgId: string): Promise<Result> {
   mustLead(v);
   return tx(db, async (q) => {
-    const [o] = await q.select().from(orgs).where(eq(orgs.id, orgId));
-    if (!o || o.billingModel === 'project') throw new UserError('Monthly credit resets do not apply to project accounts.');
     await q.update(orgs).set({ credits: sql`${orgs.monthlyCredits}`, creditsPeriod: monthKey() }).where(eq(orgs.id, orgId));
   });
 }
@@ -809,8 +788,6 @@ export async function setRate(db: DB, v: Viewer, profileId: string, rate: number
 export async function setPrice(db: DB, v: Viewer, orgId: string, price: number): Promise<Result> {
   mustOwner(v);
   return tx(db, async (q) => {
-    const [account] = await q.select().from(orgs).where(eq(orgs.id, orgId));
-    if (!account || account.billingModel === 'project') throw new UserError('Monthly pricing does not apply to project accounts.');
     await q.insert(orgPrices).values({ orgId, monthlyPrice: Math.max(0, price) })
       .onConflictDoUpdate({ target: orgPrices.orgId, set: { monthlyPrice: Math.max(0, price) } });
   });
@@ -865,7 +842,7 @@ export async function sweep(db: DB, opts: { force?: boolean } = {}): Promise<Res
     }
     if (s.autoReset) {
       const mk = monthKey(new Date(now));
-      const due = orgRows.filter((o: Org) => o.active && o.billingModel !== 'project' && o.creditsPeriod !== mk);
+      const due = orgRows.filter((o: Org) => o.active && o.creditsPeriod !== mk);
       for (const o of due) {
         await q.update(orgs).set({ credits: o.monthlyCredits, creditsPeriod: mk }).where(eq(orgs.id, o.id));
         reset++;
