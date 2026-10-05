@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate && tsx scripts/embed-migrations.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
-    "test": "tsx tests/run.ts && tsx tests/setup-test.ts"
+    "test": "tsx tests/run.ts && tsx tests/setup-test.ts",
+    "check:installation": "node --env-file=.env scripts/check-installation.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

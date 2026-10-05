@@ -1,3 +1,4 @@
+import { brand } from './brand';
 import { Resend } from 'resend';
 
 let client: Resend | null | undefined;
@@ -14,8 +15,8 @@ export async function sendEmail(msg: { to: string; subject: string; text: string
   const r = resend();
   if (!r) return false;
   try {
-    const from = process.env.EMAIL_FROM || 'Mainline <onboarding@resend.dev>';
-    const { error } = await r.emails.send({ from, to: msg.to, subject: msg.subject, text: `${msg.text}\n\nMainline by Rogers Systems Solutions` });
+    const from = process.env.EMAIL_FROM || `${brand.name} <onboarding@resend.dev>`;
+    const { error } = await r.emails.send({ from, to: msg.to, subject: msg.subject, text: `${msg.text}\n\n${brand.name} by ${brand.company}` });
     if (error) { console.error('[email] send failed', error.message); return false; }
     return true;
   } catch (e) {

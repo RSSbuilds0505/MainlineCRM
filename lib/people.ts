@@ -1,3 +1,4 @@
+import { brand } from './brand';
 import { eq } from 'drizzle-orm';
 import type { DB } from './db';
 import { profiles, type Role } from './db/schema';
@@ -55,8 +56,8 @@ export async function savePerson(db: DB, v: Viewer, input: PersonInput): Promise
     if (emailEnabled()) {
       emailed = await sendEmail({
         to: email,
-        subject: input.role === 'client' ? 'Your Mainline client portal is ready' : 'You have been added to the Mainline team',
-        text: `Hi ${input.name.trim()},\n\n${v.name} set you up on Mainline${input.role === 'client' ? ', where you can submit CRM requests and track their progress' : ''}.\n\nSign in here (the link works once and expires in 1 hour):\n${link}\n\nAfter that, sign in any time at ${appUrl()}/login with this email address.`,
+        subject: input.role === 'client' ? `Your ${brand.name} client portal is ready` : `You have been added to the ${brand.name} team`,
+        text: `Hi ${input.name.trim()},\n\n${v.name} set you up on ${brand.name}${input.role === 'client' ? ', where you can submit CRM requests and track their progress' : ''}.\n\nSign in here (the link works once and expires in 1 hour):\n${link}\n\nAfter that, sign in any time at ${appUrl()}/login with this email address.`,
       });
     }
   }

@@ -1,3 +1,4 @@
+import { brand } from '@/lib/brand';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Request, Settings } from '@/lib/db/schema';
@@ -93,7 +94,7 @@ export function Mark(): ReactNode {
   return (
     <div className="mark">
       <svg width="30" height="22" viewBox="0 0 30 22" aria-hidden="true"><rect x="0" y="6" width="30" height="3" rx="1.5" fill="currentColor" /><rect x="0" y="14" width="30" height="3" rx="1.5" fill="currentColor" /><circle cx="22" cy="11.5" r="5" fill="#D9960F" /></svg>
-      <span>Mainline <small>by RSS</small></span>
+      <span>{brand.name} <small>{brand.attribution}</small></span>
     </div>
   );
 }

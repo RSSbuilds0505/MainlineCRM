@@ -1,3 +1,4 @@
+import { brand } from './brand';
 import type { Outbox } from './workflow';
 import { sendEmail } from './email';
 
@@ -8,7 +9,7 @@ export async function slack(text: string): Promise<boolean> {
   const url = process.env.SLACK_WEBHOOK_URL;
   if (!url) return false;
   try {
-    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: `*Mainline* ${text}` }) });
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: `*${brand.name}* ${text}` }) });
     if (!r.ok) console.error('[slack] post rejected', r.status, await r.text().catch(() => ''));
     return r.ok;
   } catch (e) {
