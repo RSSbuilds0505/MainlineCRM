@@ -333,21 +333,22 @@ export async function scope(db: DB, v: Viewer, id: string, input: { credits: num
     }
     const now = new Date();
     const rt = await routeFor(q, r);
+    const allocation = account?.billingModel === 'project' ? 'project hours (no monthly credits)' : `${credits} credits`;
     const base: Partial<Request> = { credits, slaHours: hours, estHours: est, scopedAt: now, pausedBizMs: 0 };
     const [org] = await q.select().from(orgs).where(eq(orgs.id, r.orgId));
     if (rt.assigneeId) {
       await patch(q, r, { ...base, status: 'assigned', assigneeId: rt.assigneeId, qaId: rt.qaId, needsLead: false });
       const names = await q.select({ id: profiles.id, name: profiles.name }).from(profiles).where(inArray(profiles.id, [rt.assigneeId, rt.qaId ?? rt.assigneeId]));
       const nm = (x: string | null): string => names.find((n) => n.id === x)?.name ?? 'Unassigned';
-      await event(q, v, r, 'status', `Scoped at ${credits} credits, ${hours} ${clockWord(s)} SLA. Routed to ${nm(rt.assigneeId)}, QA by ${nm(rt.qaId)}. ${rt.reason}`.trim(), 'triaged', 'assigned');
+      await event(q, v, r, 'status', `Scoped against ${allocation}, ${hours} ${clockWord(s)} SLA. Routed to ${nm(rt.assigneeId)}, QA by ${nm(rt.qaId)}. ${rt.reason}`.trim(), 'triaged', 'assigned');
       await notifyStaff(q, out, v, [rt.assigneeId], `Assigned to you: ${ref(r)} for ${org?.name ?? 'a client'}, due in ${hours} ${clockWord(s)}`, r, 'assigned', true);
       await notifyStaff(q, out, v, [rt.qaId], `You are QA reviewer on ${ref(r)}`, r, 'qa-assigned');
     } else {
       await patch(q, r, { ...base, status: 'scoped', needsLead: true });
-      await event(q, v, r, 'status', `Scoped at ${credits} credits. Routing found no one: ${rt.reason}`, 'triaged', 'scoped');
+      await event(q, v, r, 'status', `Scoped against ${allocation}. Routing found no one: ${rt.reason}`, 'triaged', 'scoped');
       await notifyStaff(q, out, v, await leadIds(q), `Needs assignment: no one with capacity for ${ref(r)}`, r, 'needs-lead', true);
     }
-    await notifyClient(q, out, v, r.orgId, `ML-${r.num} is scheduled`, `"${r.title}" is scoped at ${credits} credits and scheduled with your team. Target turnaround: ${hours} ${clockWord(s)}.`, r);
+    await notifyClient(q, out, v, r.orgId, `ML-${r.num} is scheduled`, `"${r.title}" is scoped against ${allocation} and scheduled with your team. Target turnaround: ${hours} ${clockWord(s)}.`, r);
   });
 }
 
