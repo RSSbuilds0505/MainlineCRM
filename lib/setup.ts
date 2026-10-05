@@ -8,18 +8,21 @@ import { rowsOf } from './workflow';
 
 export async function applyMigrations(db: DB): Promise<string[]> {
   await db.execute(sql`create table if not exists _mainline_migrations (name text primary key, applied_at timestamptz not null default now())`);
-  const done = new Set(rowsOf<{ name: string }>(await db.execute(sql`select name from _mainline_migrations`)).map((r) => r.name));
+  return db.transaction(async (locked) => {
+  await locked.execute(sql`select pg_advisory_xact_lock(62741901)`);
+  const done = new Set(rowsOf<{ name: string }>(await locked.execute(sql`select name from _mainline_migrations`)).map((r) => r.name));
   const applied: string[] = [];
   for (const m of MIGRATIONS) {
     if (done.has(m.name)) continue;
-    await db.transaction(async (tx) => {
+    await locked.transaction(async (tx) => {
       for (const stmt of m.sql.split('--> statement-breakpoint').map((s) => s.trim()).filter(Boolean)) await tx.execute(sql.raw(stmt));
       await tx.execute(sql`insert into _mainline_migrations (name) values (${m.name})`);
     });
     applied.push(m.name);
   }
-  await db.execute(sql`alter table _mainline_migrations enable row level security`);
+  await locked.execute(sql`alter table _mainline_migrations enable row level security`);
   return applied;
+  });
 }
 
 export async function seedBasics(db: DB): Promise<void> {

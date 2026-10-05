@@ -7,6 +7,8 @@ import { requireClient } from '@/lib/auth';
 import { lookups, visibleRequests } from '@/lib/queries';
 import { ACTIVE } from '@/lib/core';
 import { Flash, Head, initials } from '@/components/ui';
+import { ProjectBudget } from '@/components/project-budget';
+import { projectSummary } from '@/lib/projects';
 import { ClientList } from '@/components/lists';
 
 export default async function PortalHome({ searchParams }: { searchParams: Record<string, string | undefined> }): Promise<ReactNode> {
@@ -20,6 +22,7 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
   const needsYou = open.filter((r) => r.status === 'waiting' || r.status === 'delivered');
   const done = rs.filter((r) => !ACTIVE.includes(r.status));
   const pct = org.monthlyCredits ? Math.max(0, Math.min(100, (org.credits / org.monthlyCredits) * 100)) : 0;
+  const budget = await projectSummary(db, v, org.id);
   const showClosed = searchParams.closed === '1';
   return (
     <>
@@ -38,11 +41,12 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
           ) : null}
         </section>
         <aside className="stack">
-          <div className="panel"><h3>Credits</h3>
+          <ProjectBudget summary={budget} />
+          {org.billingModel !== 'project' ? <div className="panel"><h3>Credits</h3>
             <p style={{ margin: '8px 0 6px' }}><strong style={{ fontSize: 20 }}>{org.credits}</strong> <span className="muted">of {org.monthlyCredits} left this month</span></p>
             <div className={`meter ${pct < 20 ? 'hot' : pct < 40 ? 'warm' : ''}`}><i style={{ width: `${pct}%` }} /></div>
             <p className="small muted" style={{ margin: '8px 0 0' }}>Credits are used when your team confirms a request&apos;s scope, and refill on the 1st. <Link href="/portal/services">See what credits buy</Link></p>
-          </div>
+          </div> : null}
           <div className="panel"><h3>Need help?</h3>
             <p className="small" style={{ margin: '8px 0 10px' }}>Something broken, data looking wrong, or a quick question? Open a support ticket. It goes straight to your implementer and never uses credits.</p>
             <Link className="btn ghost sm" href="/portal/support/new">Open a support ticket</Link>

@@ -18,9 +18,9 @@ export default async function PortalNew({ searchParams }: { searchParams: Record
   return (
     <>
       <Flash sp={searchParams} />
-      <Head title="New request" sub={`${org.credits} credits available. Credits are only used once your team confirms the scope, and you can cancel before work starts.`} />
+      <Head title="New request" sub={org.billingModel === 'project' ? 'Work is tracked against your total project hours. Monthly credits do not apply.' : `${org.credits} credits available. Credits are only used once your team confirms the scope, and you can cancel before work starts.`} />
       <div className="callout"><span>Something broken, or have a question? Open a support ticket instead. Support never uses credits.</span><Link className="btn ghost sm" href="/portal/support/new">Get support</Link></div>
-      <ClientRequestForm skus={skus} aiOn={llmEnabled()} preselect={searchParams.sku} />
+      <ClientRequestForm project={org.billingModel === 'project'} skus={skus} aiOn={llmEnabled()} preselect={searchParams.sku} />
     </>
   );
 }

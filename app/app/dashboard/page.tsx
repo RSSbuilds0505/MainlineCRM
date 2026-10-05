@@ -8,6 +8,8 @@ import { finance, getSettings, hoursByRequest, lookups, visibleRequests } from '
 import { ACTIVE, TZ, isSupport, sla } from '@/lib/core';
 import { openHoursByStaff } from '@/lib/workflow';
 import { Head, hrs, money } from '@/components/ui';
+import { projectSummary } from '@/lib/projects';
+import { ProjectBudget } from '@/components/project-budget';
 import { StaffList } from '@/components/lists';
 
 function monthBounds(back: number): [string, string, string] {
@@ -26,6 +28,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
     visibleRequests(db, v), lookups(db), getSettings(db), finance(db, v), openHoursByStaff(db), hoursByRequest(db),
     db.select().from(timelogs).where(and(gte(timelogs.workDate, from), lt(timelogs.workDate, to))),
   ]);
+  const projectAccounts = [...L.orgs.values()].filter((o) => o.active && o.billingModel === 'project');
+  const budgets = await Promise.all(projectAccounts.map((o) => projectSummary(db, v, o.id)));
   const open = all.filter((r) => ACTIVE.includes(r.status));
   const finished = all.filter((r) => r.deliveredAt && r.scopedAt && (r.status === 'delivered' || r.status === 'closed'));
   const hit = finished.filter((r) => sla(r, s)?.text === 'Met SLA').length;
@@ -42,7 +46,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
   if (fin) {
     const rate = (id: string): number => Number(fin.rates.get(id) ?? 0);
     const missing = [...new Set(logs.filter((t) => !rate(t.staffId)).map((t) => t.staffId))];
-    const rows = [...L.orgs.values()].filter((o) => o.active).map((o) => {
+    const rows = [...L.orgs.values()].filter((o) => o.active && o.billingModel !== 'project').map((o) => {
       const ls = logs.filter((t) => t.orgId === o.id);
       const h = ls.reduce((x, t) => x + Number(t.hours), 0);
       const cost = ls.reduce((x, t) => x + Number(t.hours) * rate(t.staffId), 0);
@@ -118,7 +122,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Record
           </div></section>
           <section className="panel"><h2>Escalations</h2><StaffList reqs={open.filter((r) => (sla(r, s)?.level ?? 0) >= 2)} L={L} s={s} empty="No escalations right now." /></section>
         </div>
-        {margin}
+        {projectAccounts.length ? <section className="stack"><h2>Project budgets</h2>{v.role === 'owner' ? <Link className="btn ghost sm" href="/api/project-export">Download project budgets CSV</Link> : null}{projectAccounts.map((o, i) => <div key={o.id}><h3><Link href={`/app/clients/${o.id}`}>{o.name}</Link></h3><ProjectBudget summary={budgets[i]}/></div>)}</section> : null}
+      {margin}
       </div>
     </>
   );

@@ -17,6 +17,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { isLeadRole, isStaffRole, MIN_PASSWORD, PLATFORMS } from '@/lib/core';
 import * as wf from '@/lib/workflow';
 import { store } from '@/lib/storage';
+import { applyMigrations } from '@/lib/setup';
 
 const s = (fd: FormData, k: string): string => String(fd.get(k) ?? '').trim();
 const n = (fd: FormData, k: string, d = 0): number => { const v = Number(fd.get(k)); return Number.isFinite(v) && fd.get(k) !== '' && fd.get(k) !== null ? v : d; };
@@ -230,8 +231,9 @@ async function attachFromForm(db: DB, v: wf.Viewer, id: string, fd: FormData): P
 export async function testEmailAction(): Promise<never> {
   const v = await requireViewer();
   if (!isLeadRole(v.role)) redirect('/app');
-  const ok = await sendEmail({ to: v.email, subject: 'Mainline test email', text: `Hi ${v.name.split(' ')[0]},\n\nEmail from Mainline is working. Your team will get assignment, escalation and client-message emails from this address.` });
-  redirect(withFlash('/app/setup', ok ? { ok: `Test email sent to ${v.email}. Check your inbox (and spam, the first time).` } : { err: 'The test email did not send. Check the Resend API key and that the sending domain is verified.' }));
+  const to = v.role === 'owner' ? (process.env.EMAIL_TEST_TO || v.email) : v.email;
+  const ok = await sendEmail({ verification: true, to, subject: 'Mainline test email', text: `Hi ${v.name.split(' ')[0]},\n\nEmail from Mainline is working. Your team will get assignment, escalation and client-message emails from this address.` });
+  redirect(withFlash('/app/setup', ok ? { ok: `Verification email accepted for ${to}. Confirm receipt before enabling notifications.` } : { err: 'The test email did not send. Check the Resend API key and that the sending domain is verified.' }));
 }
 export async function testSlackAction(): Promise<never> {
   const v = await requireViewer();
@@ -334,9 +336,11 @@ export async function saveOrgAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app/setup'), async (db, v) => {
     const res = await wf.saveOrg(db, v, {
       id: s(fd, 'orgId') || undefined, name: s(fd, 'name'), platform: s(fd, 'platform'), podId: s(fd, 'podId') || null,
+      billingModel: s(fd, 'billingModel') || undefined, contractedHours: s(fd, 'contractedHours') === '' ? undefined : Number(s(fd, 'contractedHours')), projectRate: s(fd, 'projectRate') === '' ? undefined : Number(s(fd, 'projectRate')),
       plan: s(fd, 'plan'), monthlyCredits: n(fd, 'monthlyCredits'), credits: n(fd, 'credits'), active: s(fd, 'orgId') ? b(fd, 'active') : true,
     });
-    if (v.role === 'owner' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
+    const [account] = await db.select({ billingModel: orgs.billingModel }).from(orgs).where(eq(orgs.id, res.value));
+    if (v.role === 'owner' && account?.billingModel !== 'project' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
     return res;
   }, 'Client saved.');
 }
@@ -355,4 +359,12 @@ export async function saveSkuAction(fd: FormData): Promise<never> {
 }
 export async function saveSettingsAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app/setup'), (db, v) => wf.saveSettings(db, v, { slaMode: s(fd, 'slaMode'), bizStart: n(fd, 'bizStart', 9), bizEnd: n(fd, 'bizEnd', 18), autoReset: b(fd, 'autoReset') }), 'Settings saved.');
+}
+
+export async function upgradeAction(): Promise<never> {
+  return run('/app/upgrade', async (db, v) => {
+    if (v.role !== 'owner' || !v.active) throw new wf.UserError('Only the owner can apply migrations.');
+    await applyMigrations(db);
+    return { value: null, out: { email: [], slack: [] } };
+  }, 'Database is up to date.');
 }

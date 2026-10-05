@@ -73,9 +73,9 @@ export default async function StaffRequest({ params, searchParams }: { params: {
       <form key="scope" action={A.scopeAction} className="form">
         {hidden}
         <h3>Scope and assign</h3>
-        <p className="small muted" style={{ margin: 0 }}>Debits credits, starts the resolution clock ({clockWord(s)}) and routes to the best implementer. {org?.name} has {org?.credits ?? 0} credits.</p>
+        <p className="small muted" style={{ margin: 0 }}>{org?.billingModel === 'project' ? `Work counts toward ${org.contractedHours} total project hours; no monthly credits are debited.` : `${org?.name} has ${org?.credits ?? 0} credits. Scoping debits credits.`} Starts the resolution clock ({clockWord(s)}) and routes to the best implementer.</p>
         <div className="three">
-          <label className="f">Credits<input type="number" name="credits" min={0} defaultValue={sku?.credits ?? 0} /></label>
+          {org?.billingModel === 'project' ? <input type="hidden" name="credits" value="0"/> : <label className="f">Credits<input type="number" name="credits" min={0} defaultValue={sku?.credits ?? 0} /></label>}
           <label className="f">SLA ({clockWord(s)})<input type="number" name="slaHours" min={1} defaultValue={slaHoursFor(sku, r.priority)} /></label>
           <label className="f">Estimated hours<input type="number" name="estHours" min={0} step={0.5} defaultValue={sku?.estHours ?? 0} /></label>
         </div>

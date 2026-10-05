@@ -13,6 +13,9 @@ import * as wf from '../lib/workflow';
 import { visibleRequests, requestDetail } from '../lib/queries';
 import { CATALOG } from '../lib/catalog';
 import { bizMs, addBiz, H } from '../lib/core';
+import { projectSummary } from '../lib/projects';
+import { projectBudget, projectValue } from '../lib/project-budget';
+import { csvField } from '../lib/csv';
 import { memoryStore, setStoreForTests } from '../lib/storage';
 import { videoEmbed, safeName, checkLink } from '../lib/media';
 
@@ -252,6 +255,38 @@ async function main(): Promise<void> {
   ok(safeName('../../etc/passwd') === 'etcpasswd' && safeName('   ') === 'file', 'file names cannot climb out of their folder');
   ok(checkLink('ftp://x.com/a') === null, 'only web links are accepted');
 
+  console.log('\nProject allocations and owner-only pricing');
+  await throws(wf.saveOrg(db, lead, { name: 'Blocked project', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 0, billingModel: 'project', contractedHours: 100, projectRate: 100 }), 'lead cannot create financial contract terms', /Only the owner/);
+  await throws(wf.saveOrg(db, owner, { name: 'Invalid project', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 0, billingModel: 'project', contractedHours: NaN }), 'nonfinite budget is rejected');
+  await throws(wf.saveOrg(db, owner, { name: 'Invalid rate', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 0, billingModel: 'project', contractedHours: 100, projectRate: -1 }), 'negative rate is rejected');
+  const projectId = (await wf.saveOrg(db, owner, { name: 'Isolated project', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 999, billingModel: 'project', contractedHours: 100, projectRate: 100 })).value;
+  const projectClient = await mk('Project Client', 'client', { orgId: projectId });
+  const projectReq = (await wf.createRequest(db, owner, { orgId: projectId, skuId: 'any-custom', title: 'Project delivery', description: 'Isolated acceptance test', priority: 'normal', triageNow: true })).value;
+  await wf.scope(db, owner, projectReq, { credits: 999, slaHours: 40, estHours: 10 });
+  const [scopedProject] = await db.select().from(schema.requests).where(eq(schema.requests.id, projectReq));
+  ok(scopedProject.credits === 0, 'project scoping ignores monthly credit input');
+  const [projectOrg] = await db.select().from(schema.orgs).where(eq(schema.orgs.id, projectId));
+  ok(projectOrg.monthlyCredits === 0 && projectOrg.credits === 0, 'project account never receives monthly credits');
+  await wf.logTime(db, owner, projectReq, { hours: 2.5, note: 'Project work', workDate: '2026-10-01' });
+  const budget = await projectSummary(db, owner, projectId);
+  ok(budget?.financial?.value === 10000 && budget.financial.loggedValue === 250 && budget.remaining === 97.5, 'fictional 100 hours at $100 produces $10,000 and tracks logged/remaining hours');
+  ok((await projectSummary(db, lead, projectId))?.financial === null, 'lead summary omits all project pricing');
+  ok((await projectSummary(db, projectClient, projectId))?.financial === null, 'own client sees operational allocation only');
+  ok(await projectSummary(db, clientA, projectId) === null && await projectSummary(db, impB, projectId) === null, 'other client and pod cannot access project summary');
+  ok(await projectSummary(db, { ...owner, active: false }, projectId) === null, 'inactive owner cannot access project summary');
+  await throws(wf.resetCredits(db, lead, projectId), 'manual credit resets are blocked for projects');
+  await throws(wf.setPrice(db, owner, projectId, 500), 'project account cannot be assigned monthly subscription pricing');
+  await db.update(schema.orgs).set({ creditsPeriod: '2000-01' }).where(eq(schema.orgs.id, projectId));
+  await db.update(schema.settings).set({ autoReset: true, lastSweepAt: null });
+  await wf.sweep(db, { force: true });
+  const [afterReset] = await db.select().from(schema.orgs).where(eq(schema.orgs.id, projectId));
+  ok(afterReset.contractedHours === 100 && afterReset.creditsPeriod === '2000-01', 'monthly sweep leaves project allocation and period untouched');
+  await throws(wf.saveOrg(db, lead, { id: projectId, name: 'Isolated project', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 0, contractedHours: 200 }), 'lead cannot change contracted budget');
+  await throws(wf.saveOrg(db, owner, { id: projectId, name: 'Isolated project', platform: 'LeadSquared', podId: podA.id, plan: 'Project', monthlyCredits: 0, billingModel: 'retainer' }), 'cannot switch billing model over existing history');
+  ok(projectBudget(100, 80).warning !== null && projectBudget(100, 100).warning === 'Allocation exhausted' && projectBudget(100, 101).remaining === -1, '80 percent, exhausted, and over-budget warnings');
+  ok(projectValue(1.25, 125.55) === 156.94, 'money is rounded to cents');
+  ok(csvField('=HYPERLINK("x")').startsWith('"\'') && csvField(-1) === '"-1"', 'CSV neutralizes text formulas while preserving numeric values');
+
   console.log('\nRow Level Security (direct database access with the public key)');
   const asUser = async <T>(uid: string, q: string): Promise<T[]> => {
     await pg.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${uid}', false);`);
@@ -267,6 +302,8 @@ async function main(): Promise<void> {
   ok((await asUser(clientA.id, 'select * from orgs')).length === 1, 'client reads only its own company record');
   ok((await asUser(lead.id, 'select * from staff_rates')).length === 0, 'lead cannot read pay rates');
   ok((await asUser(owner.id, 'select * from staff_rates')).length === 1, 'owner can read pay rates');
+  ok((await asUser(lead.id, 'select * from project_prices')).length === 0 && (await asUser(projectClient.id, 'select * from project_prices')).length === 0, 'RLS hides project pricing from leads and clients');
+  ok((await asUser(owner.id, 'select * from project_prices')).length === 1, 'RLS allows owner project pricing');
   const total = (await db.select().from(schema.requests)).length;
   ok((await asUser(imp1.id, 'select * from requests')).length === total, `staff can read all ${total} requests`);
   let blocked = false;
