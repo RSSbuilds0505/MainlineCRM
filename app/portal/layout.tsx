@@ -6,7 +6,7 @@ import { getDb } from '@/lib/db';
 import { orgs } from '@/lib/db/schema';
 import { unreadCount } from '@/lib/queries';
 import { Mark } from '@/components/ui';
-import { AutoRefresh, NavLinks } from '@/components/client';
+import { AutoRefresh, Menu, NavLinks } from '@/components/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,12 +26,15 @@ export default async function PortalLayout({ children }: { children: ReactNode }
         <div className="bar">
           <a href="/portal" style={{ textDecoration: 'none' }}><Mark /></a>
           <div className="who">
-            <span className="me">{org.name}</span>
-            <span>{v.name}{unread ? ` (${unread} new)` : ''}</span>
-            <form action="/auth/signout" method="post"><button className="btn ghost sm" type="submit">Sign out</button></form>
+            <Menu label={<span className="me">{v.name}{unread ? <span className="count" aria-label={`${unread} new`}>{unread}</span> : null}</span>}>
+              <span className="small muted menu-role">{org.name}</span>
+              <a href="/portal/services">Services</a>
+              <a href="/portal/account">Account</a>
+              <form action="/auth/signout" method="post"><button type="submit">Sign out</button></form>
+            </Menu>
           </div>
         </div>
-        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: 'New request' }, { href: '/portal/support/new', label: 'Get support' }, { href: '/portal/services', label: 'Services' }, { href: '/portal/account', label: 'Account' }]} />
+        <NavLinks items={[{ href: '/portal', label: 'My requests', exact: true }, { href: '/portal/new', label: '+ New' }]} />
       </header>
       <main>{pw ? null : <PasswordNudge href="/portal/account" />}{children}</main>
       <AutoRefresh seconds={60} />

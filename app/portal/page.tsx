@@ -27,7 +27,7 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
   return (
     <>
       <Flash sp={searchParams} />
-      <Head title={org.name} sub={`${org.platform}, ${org.plan} plan`}><div className="row"><Link className="btn ghost" href="/portal/support/new">Get support</Link><Link className="btn sig" href="/portal/new">New request</Link></div></Head>
+      <Head title={org.name} sub={`${org.platform}, ${org.plan} plan`}><Link className="btn sig" href="/portal/new">+ New</Link></Head>
       <div className="grid2">
         <section className="stack">
           {needsYou.length ? <><h2>Needs your attention</h2><ClientList reqs={needsYou} L={L} empty="" /></> : null}
@@ -49,7 +49,7 @@ export default async function PortalHome({ searchParams }: { searchParams: Recor
           </div> : null}
           <div className="panel"><h3>Need help?</h3>
             <p className="small" style={{ margin: '8px 0 10px' }}>Something broken, data looking wrong, or a quick question? Open a support ticket. It goes straight to your implementer and never uses credits.</p>
-            <Link className="btn ghost sm" href="/portal/support/new">Open a support ticket</Link>
+            <Link className="btn ghost sm" href="/portal/new/support">Open a support ticket</Link>
           </div>
           <div className="panel"><h3>Your team</h3>
             <div className="team" style={{ marginTop: 10 }}>

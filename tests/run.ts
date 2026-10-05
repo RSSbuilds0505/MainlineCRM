@@ -287,12 +287,32 @@ async function main(): Promise<void> {
   ok(projectValue(1.25, 125.55) === 156.94, 'money is rounded to cents');
   ok(csvField('=HYPERLINK("x")').startsWith('"\'') && csvField(-1) === '"-1"', 'CSV neutralizes text formulas while preserving numeric values');
 
+  console.log('\nConfirm and schedule (one step instead of triage then scope)');
+  const cs = (await wf.createRequest(db, clientB, { orgId: orgB, skuId: 'hs-report', title: 'Pipeline report', description: 'Weekly', priority: 'normal' })).value;
+  await throws(wf.confirmAndSchedule(db, imp1, cs, { skuId: 'hs-report', priority: 'normal' }), 'implementer cannot confirm and schedule');
+  await throws(wf.confirmAndSchedule(db, lead, cs, { skuId: 'support', priority: 'normal' }), 'support cannot be scheduled as a paid service', /Pick a service/);
+  await wf.confirmAndSchedule(db, lead, cs, { skuId: 'hs-report', priority: 'high', credits: null, slaHours: null, estHours: null });
+  const [csr] = await db.select().from(schema.requests).where(eq(schema.requests.id, cs));
+  ok(['scoped', 'assigned'].includes(csr.status) && csr.credits === 2 && csr.priority === 'high' && Number(csr.estHours) === 3, 'blank fields fall back to the service standard numbers in one step');
+  await throws(wf.confirmAndSchedule(db, lead, cs, { skuId: 'hs-report', priority: 'high' }), 'a scheduled request cannot be confirmed twice', /already scheduled/);
+  const cs2 = (await wf.createRequest(db, clientB, { orgId: orgB, skuId: 'hs-report', title: 'Second report', description: '', priority: 'normal' })).value;
+  await wf.triage(db, lead, cs2, 'hs-report', 'normal');
+  await wf.confirmAndSchedule(db, lead, cs2, { skuId: 'hs-workflow', priority: 'normal', credits: 1, slaHours: 8 });
+  const [csr2] = await db.select().from(schema.requests).where(eq(schema.requests.id, cs2));
+  ok(['scoped', 'assigned'].includes(csr2.status) && csr2.skuId === 'hs-workflow' && csr2.credits === 1, 'an already-triaged request can change service and use custom numbers');
+  const pj2 = (await wf.createRequest(db, owner, { orgId: projectId, skuId: 'any-custom', title: 'Project item', description: '', priority: 'normal' })).value;
+  await wf.confirmAndSchedule(db, owner, pj2, { skuId: 'any-custom', priority: 'normal', credits: 50 });
+  const [pjr] = await db.select().from(schema.requests).where(eq(schema.requests.id, pj2));
+  ok(['scoped', 'assigned'].includes(pjr.status) && pjr.credits === 0, 'project accounts never use credits when scheduled');
+  const tkc = (await wf.createSupportTicket(db, clientA, { orgId: orgA, category: 'question', title: 'Quick q', description: 'How?', priority: 'normal' })).value;
+  await throws(wf.confirmAndSchedule(db, csm, tkc, { skuId: 'hs-report', priority: 'normal' }), 'support tickets skip this step', /already scheduled/);
+
   console.log('\nRow Level Security (direct database access with the public key)');
   const asUser = async <T>(uid: string, q: string): Promise<T[]> => {
     await pg.exec(`set role authenticated; select set_config('request.jwt.claim.sub', '${uid}', false);`);
     try { return (await pg.query<T>(q)).rows; } finally { await pg.exec(`reset role;`); }
   };
-  ok((await asUser(clientB.id, 'select * from requests')).length === 0, 'Ridgeview contact reads zero Harbor Dental requests');
+  ok((await asUser<{ org_id: string }>(clientB.id, 'select * from requests')).every((x) => x.org_id !== orgA), 'Ridgeview contact reads zero Harbor Dental requests');
   ok((await asUser(clientA.id, 'select * from requests')).length === (await visibleRequests(db, clientA)).length, 'Harbor Dental contact reads exactly its own requests');
   ok((await asUser<{ internal: boolean }>(clientA.id, 'select * from comments')).every((x) => !x.internal), 'client cannot read internal notes');
   ok((await asUser(clientA.id, 'select * from request_events')).length === 0, 'client cannot read the activity log');

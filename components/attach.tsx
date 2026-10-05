@@ -25,7 +25,7 @@ function screenshotName(type: string): string {
  * On an existing request, files are saved as soon as they finish uploading. On a new-request form ("draft"),
  * finished uploads ride along with the form as hidden fields and are attached when the form is submitted.
  */
-export function AttachBox({ requestId, canInternal = false, draft = false }: { requestId?: string; canInternal?: boolean; draft?: boolean }): ReactNode {
+export function AttachBox({ requestId, canInternal = false, draft = false, compact = false, internalFrom }: { requestId?: string; canInternal?: boolean; draft?: boolean; compact?: boolean; internalFrom?: string }): ReactNode {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -67,14 +67,14 @@ export function AttachBox({ requestId, canInternal = false, draft = false }: { r
     setItems((xs) => [...xs, ...accepted.map((a) => ({ key: a.key, name: a.name, size: a.file.size, preview: a.file.type.startsWith('image/') ? URL.createObjectURL(a.file) : null, status: 'uploading' as const }))]);
     const done = (await Promise.all(accepted.map((a) => uploadOne(a.file, a.name, a.key)))).filter((x): x is { path: string; name: string } => !!x);
     if (draft || !done.length) return;
-    const res = await fetch('/api/uploads/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, files: done, internal }) });
+    const res = await fetch('/api/uploads/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, files: done, internal: internal || (!!internalFrom && !!(document.getElementById(internalFrom) as HTMLInputElement | null)?.checked) }) });
     const body = (await res.json().catch(() => ({}))) as { error?: string; count?: number };
     if (!res.ok) { setMsg({ ok: false, text: body.error ?? 'Could not save the attachment.' }); return; }
     setItems((xs) => xs.filter((x) => !done.some((d) => d.path === x.path)));
     setMsg({ ok: true, text: `${body.count ?? done.length} attached.` });
     router.refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft, requestId, internal, router]);
+  }, [draft, requestId, internal, internalFrom, router]);
 
   // Paste a screenshot anywhere on the page (Ctrl+V or Cmd+V).
   useEffect(() => {
@@ -88,9 +88,47 @@ export function AttachBox({ requestId, canInternal = false, draft = false }: { r
     return () => document.removeEventListener('paste', onPaste);
   }, [handle]);
 
+  // In the compact message-box version, a file dropped anywhere on the page is attached.
+  useEffect(() => {
+    if (!compact) return;
+    const over = (e: DragEvent): void => { if (e.dataTransfer?.types.includes('Files')) { e.preventDefault(); setOver(true); } };
+    const leave = (e: DragEvent): void => { if (!e.relatedTarget) setOver(false); };
+    const drop = (e: DragEvent): void => { if (!e.dataTransfer?.files.length) return; e.preventDefault(); setOver(false); void handle([...e.dataTransfer.files]); };
+    document.addEventListener('dragover', over); document.addEventListener('dragleave', leave); document.addEventListener('drop', drop);
+    return () => { document.removeEventListener('dragover', over); document.removeEventListener('dragleave', leave); document.removeEventListener('drop', drop); };
+  }, [compact, handle]);
+
   // While uploads run, block the surrounding form from submitting half-finished.
   useEffect(() => { guardRef.current?.setCustomValidity(busy ? 'Wait for your files to finish uploading.' : ''); }, [busy]);
   useEffect(() => () => items.forEach((i) => i.preview && URL.revokeObjectURL(i.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const list = items.length ? (
+    <ul className="uploads">
+      {items.map((i) => (
+        <li key={i.key} className={i.status}>
+          {i.preview ? <img src={i.preview} alt="" /> : <span className="ficon" aria-hidden="true">{i.name.split('.').pop()?.slice(0, 4).toUpperCase()}</span>}
+          <span className="nm">{i.name}<br /><span className="small muted">{i.status === 'uploading' ? 'Uploading' : i.status === 'error' ? i.error : draft ? `Ready, ${fmtBytes(i.size)}` : 'Saving'}</span></span>
+          {draft && i.status !== 'uploading' ? <button type="button" className="btn ghost sm" onClick={() => setItems((xs) => xs.filter((x) => x.key !== i.key))}>Remove</button> : null}
+          {draft && i.status === 'done' ? <input type="hidden" name="file" value={JSON.stringify({ path: i.path, name: i.name })} /> : null}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
+  if (compact) {
+    return (
+      <div className={`attach compact${over ? ' over' : ''}`}>
+        <button type="button" className="btn ghost sm clip" onClick={() => inputRef.current?.click()} title="Attach screenshots or files. You can also paste a screenshot or drop files anywhere on the page.">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.5 6.5v10a4.5 4.5 0 0 1-9 0V5a3 3 0 0 1 6 0v10.5a1.5 1.5 0 0 1-3 0V6.5H9v9a3 3 0 0 0 6 0V5a4.5 4.5 0 0 0-9 0v11.5a6 6 0 0 0 12 0v-10z" /></svg>
+          Attach
+        </button>
+        <input ref={inputRef} type="file" multiple accept={ACCEPT} hidden onChange={(e) => { void handle([...(e.target.files ?? [])]); e.target.value = ''; }} />
+        {over ? <span className="small" role="status">Drop to attach</span> : null}
+        {list}
+        {msg ? <p className={`small ${msg.ok ? 'ok-text' : 'err-text'}`} role={msg.ok ? 'status' : 'alert'} style={{ margin: 0 }}>{msg.text}</p> : null}
+      </div>
+    );
+  }
 
   return (
     <div className="attach">
@@ -110,18 +148,7 @@ export function AttachBox({ requestId, canInternal = false, draft = false }: { r
       {canInternal && !draft ? (
         <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Internal only (client can&apos;t see)</label>
       ) : null}
-      {items.length ? (
-        <ul className="uploads">
-          {items.map((i) => (
-            <li key={i.key} className={i.status}>
-              {i.preview ? <img src={i.preview} alt="" /> : <span className="ficon" aria-hidden="true">{i.name.split('.').pop()?.slice(0, 4).toUpperCase()}</span>}
-              <span className="nm">{i.name}<br /><span className="small muted">{i.status === 'uploading' ? 'Uploading' : i.status === 'error' ? i.error : draft ? `Ready, ${fmtBytes(i.size)}` : 'Saving'}</span></span>
-              {draft && i.status !== 'uploading' ? <button type="button" className="btn ghost sm" onClick={() => setItems((xs) => xs.filter((x) => x.key !== i.key))}>Remove</button> : null}
-              {draft && i.status === 'done' ? <input type="hidden" name="file" value={JSON.stringify({ path: i.path, name: i.name })} /> : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      {list}
       {draft ? <input ref={guardRef} className="guard" tabIndex={-1} aria-hidden="true" defaultValue="" /> : null}
       {draft ? (
         <label className="f">Loom or video link (optional)<input type="url" name="videoUrl" inputMode="url" placeholder="https://www.loom.com/share/..." /></label>

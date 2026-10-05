@@ -33,7 +33,7 @@ async function main(): Promise<void> {
 
   let p = await as(ctx, 'client');
   await p.goto(`${BASE}/portal`); await shot(p, 'client-home');
-  await p.goto(`${BASE}/portal/support/new`); await shot(p, 'client-support-form');
+  await p.goto(`${BASE}/portal/new`); await p.click('a.pick:has-text("broken")'); await p.waitForURL('**/portal/new/support'); await shot(p, 'client-support-form');
   await p.locator('label.choice', { hasText: 'Something is broken' }).click();
   await p.fill('input[name=title]', 'Demo request form is not creating contacts');
   await p.fill('textarea[name=description]', 'Since this morning, submissions on the website demo form show a thank-you page but no contact is created in HubSpot.');
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const impKey = specialist === 'Priya Shah' ? 'imp' : 'imp2';
   p = await as(ctx, impKey);
   await p.goto(`${BASE}/app`); await shot(p, 'implementer-queue');
-  console.log('implementer queue shows ticket:', (await p.locator('section:has(h2:has-text("Your support tickets")) .req').count()) === 1);
+  console.log('implementer queue shows ticket:', (await p.locator('.reqs.todo .req', { hasText: 'Start this ticket' }).count()) === 1);
   await p.goto(`${BASE}/app/requests/${id}`);
   console.log('QA button present:', await p.locator('button:has-text("Submit for QA")').count());
   await p.click('button:has-text("Start on this ticket")'); await p.waitForLoadState('networkidle');
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   await p.close();
 
   p = await as(ctx, 'csm');
-  await p.goto(`${BASE}/app/support/new`); await shot(p, 'csm-log-ticket');
+  await p.goto(`${BASE}/app/new/support`); await shot(p, 'csm-log-ticket');
   await p.selectOption('select[name=orgId]', { label: 'Ridgeview Nonprofit' });
   await p.fill('input[name=contact]', 'Ben Ortiz, phone');
   await p.locator('label.choice', { hasText: 'Access or login' }).click();
@@ -101,20 +101,20 @@ async function main(): Promise<void> {
   await p.close();
 
   p = await as(ctx, 'imp');
-  const r = await p.goto(`${BASE}/app/support/new`);
+  const r = await p.goto(`${BASE}/app/new/support`); await p.waitForURL(/\/app$/, { timeout: 5000 }).catch(() => undefined);
   console.log('implementer visiting log-ticket page ends at', new URL(p.url()).pathname, r?.status());
   await p.close();
 
   p = await as(ctx, 'owner');
   await p.goto(`${BASE}/app`); await shot(p, 'owner-attention');
-  await p.goto(`${BASE}/app/dashboard`); await shot(p, 'owner-dashboard');
+  await p.goto(`${BASE}/app/dashboard`); await p.waitForURL(/\/app#overview|\/app$/); await shot(p, 'owner-dashboard');
   await p.goto(`${BASE}/app/setup`);
   console.log('support service hidden from Setup catalog:', !(await p.content()).includes('>Support ticket<'));
   await p.close();
 
   p = await as(ctx, 'client');
   await p.setViewportSize({ width: 390, height: 844 });
-  await p.goto(`${BASE}/portal/support/new`); await shot(p, 'mobile-client-support');
+  await p.goto(`${BASE}/portal/new/support`); await shot(p, 'mobile-client-support');
   await p.goto(`${BASE}/portal/new`);
   console.log('support hidden from paid service picker:', !(await p.content()).includes('value="support"'));
   await p.close();

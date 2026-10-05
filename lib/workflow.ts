@@ -27,7 +27,7 @@ const newOutbox = (): Outbox => ({ email: [], slack: [] });
 
 export type Action =
   | 'triage' | 'scope' | 'assign' | 'reassign' | 'start' | 'ask' | 'submitqa' | 'resume' | 'qa' | 'accept' | 'revise'
-  | 'autoclose' | 'cancel' | 'flag' | 'clearflag' | 'internal' | 'logtime' | 'comment' | 'clientReply' | 'resolve';
+  | 'autoclose' | 'cancel' | 'flag' | 'clearflag' | 'internal' | 'logtime' | 'comment' | 'clientReply' | 'resolve' | 'confirm';
 
 export function allowed(action: Action, r: Pick<Request, 'status' | 'assigneeId' | 'qaId' | 'unhappy' | 'autoAcceptAt' | 'orgId' | 'skuId'>, v: Viewer): boolean {
   if (!v.active) return false;
@@ -38,6 +38,7 @@ export function allowed(action: Action, r: Pick<Request, 'status' | 'assigneeId'
   switch (action) {
     case 'triage': return r.status === 'submitted' && csm;
     case 'scope': return r.status === 'triaged' && csm;
+    case 'confirm': return !support && (r.status === 'submitted' || r.status === 'triaged') && csm;
     case 'assign': return r.status === 'scoped' && csm;
     case 'reassign': return WORKING.includes(r.status) && csm;
     case 'start': return r.status === 'assigned' && (mine || lead);
@@ -352,6 +353,33 @@ export async function scope(db: DB, v: Viewer, id: string, input: { credits: num
   });
 }
 
+/**
+ * Confirms the service and priority and schedules the work in one step (triage plus scoping).
+ * Blank numbers fall back to the chosen service's standard credits, turnaround and estimate.
+ */
+export async function confirmAndSchedule(db: DB, v: Viewer, id: string, input: { skuId: string; priority: Priority; credits?: number | null; slaHours?: number | null; estHours?: number | null }): Promise<Result> {
+  const r0 = await loadRequest(db, v, id);
+  must(allowed('confirm', r0, v), 'This request is already scheduled.');
+  const [sku] = await db.select().from(skus).where(eq(skus.id, input.skuId));
+  if (!sku || !sku.active || sku.id === SUPPORT_SKU) throw new UserError('Pick a service.');
+  if (!PRI[input.priority]) throw new UserError('Pick a priority.');
+  const num = (x: number | null | undefined): number | null => (x === null || x === undefined || Number.isNaN(x) ? null : x);
+  const out = newOutbox();
+  if (r0.status === 'submitted') {
+    const t = await triage(db, v, id, sku.id, input.priority);
+    out.email.push(...t.out.email); out.slack.push(...t.out.slack);
+  } else if (r0.skuId !== sku.id || r0.priority !== input.priority) {
+    await db.update(requests).set({ skuId: sku.id, priority: input.priority, updatedAt: new Date() }).where(eq(requests.id, id));
+  }
+  const sc = await scope(db, v, id, {
+    credits: num(input.credits) ?? sku.credits,
+    slaHours: num(input.slaHours) ?? slaHoursFor(sku, input.priority),
+    estHours: num(input.estHours) ?? Number(sku.estHours ?? 0),
+  });
+  out.email.push(...sc.out.email); out.slack.push(...sc.out.slack);
+  return { value: undefined, out };
+}
+
 export async function assign(db: DB, v: Viewer, id: string, assigneeId: string, qaId: string | null): Promise<Result> {
   return tx(db, async (q, out) => {
     const r = await loadRequest(q, v, id);
@@ -641,13 +669,13 @@ export async function addFiles(db: DB, v: Viewer, id: string, files: FileRef[], 
 }
 
 /** Adds a Loom, YouTube, Vimeo or other link to a request. */
-export async function addLink(db: DB, v: Viewer, id: string, raw: string, internal = false): Promise<Result<number>> {
+export async function addLink(db: DB, v: Viewer, id: string, raw: string, internal = false, quiet = false): Promise<Result<number>> {
   const link = checkLink(raw);
   if (!link) throw new UserError('Paste a full link that starts with https://, for example a Loom share link.');
   return tx(db, async (q, out) => {
     const r = await loadRequest(q, v, id);
     must(allowed('comment', r, v), 'Attachments are closed on this request.');
-    return insertAttachments(q, out, v, r, [{ kind: 'link', name: link.name, url: link.url }], internal, true);
+    return insertAttachments(q, out, v, r, [{ kind: 'link', name: link.name, url: link.url }], internal, !quiet);
   });
 }
 

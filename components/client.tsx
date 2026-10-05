@@ -19,11 +19,11 @@ export function AutoRefresh({ seconds = 30 }: { seconds?: number }): ReactNode {
 }
 
 /** A submit button that disables itself while the form is saving. */
-export function Submit({ children, className = 'btn', confirmText, name, value }: { children: ReactNode; className?: string; confirmText?: string; name?: string; value?: string }): ReactNode {
+export function Submit({ children, className = 'btn', confirmText, name, value, skipChecks = false }: { children: ReactNode; className?: string; confirmText?: string; name?: string; value?: string; skipChecks?: boolean }): ReactNode {
   const { pending } = useFormStatus();
   return (
     <button
-      type="submit" className={className} disabled={pending} name={name} value={value}
+      type="submit" className={className} disabled={pending} name={name} value={value} formNoValidate={skipChecks || undefined}
       onClick={(e) => { if (confirmText && !window.confirm(confirmText)) e.preventDefault(); }}
     >
       {pending ? 'Saving' : children}
@@ -134,4 +134,19 @@ export function NavLinks({ items }: { items: { href: string; label: string; coun
       })}
     </nav>
   );
+}
+
+/** A dropdown under the person's name. Closes on an outside click, Escape, or after picking a page. */
+export function Menu({ label, children }: { label: ReactNode; children: ReactNode }): ReactNode {
+  const path = usePathname();
+  useEffect(() => {
+    const close = (e: Event): void => {
+      document.querySelectorAll<HTMLDetailsElement>('details.menu[open]').forEach((d) => {
+        if (e.type === 'keydown' ? (e as KeyboardEvent).key === 'Escape' : !d.contains(e.target as Node)) d.open = false;
+      });
+    };
+    document.addEventListener('click', close); document.addEventListener('keydown', close);
+    return () => { document.removeEventListener('click', close); document.removeEventListener('keydown', close); };
+  }, []);
+  return <details className="menu" key={path}><summary>{label}</summary><div className="menu-list">{children}</div></details>;
 }

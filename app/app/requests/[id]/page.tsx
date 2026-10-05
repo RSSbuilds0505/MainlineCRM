@@ -5,13 +5,13 @@ import { getDb } from '@/lib/db';
 import { requireStaff } from '@/lib/auth';
 import { getSettings, lookups, requestDetail } from '@/lib/queries';
 import { allowed, openHoursByStaff } from '@/lib/workflow';
-import { LBL, PRI, SUPPORT_LBL, TZ, clockWord, isCatalogSku, isLeadRole, isSupport, sla, slaHoursFor, supportCategoryLabel } from '@/lib/core';
+import { LBL, PRI, SUPPORT_LBL, TZ, WORKING, clockWord, isCatalogSku, isLeadRole, isSupport, sla, slaHoursFor, supportCategoryLabel } from '@/lib/core';
 import { llmEnabled } from '@/lib/llm';
 import type { Profile } from '@/lib/db/schema';
 import { Flash, Line, Linkify, SlaChip, fmtDay, fmtWhen, hrs } from '@/components/ui';
 import { Submit, Timer } from '@/components/client';
 import * as A from '@/app/actions';
-import { AttachmentsPanel } from '@/components/attachments';
+import { Conversation } from '@/components/attachments';
 
 function load(p: Profile, open: number): string {
   return `${p.name} (${Math.round((open / (p.capacity || 30)) * 100)}% loaded)`;
@@ -41,107 +41,133 @@ export default async function StaffRequest({ params, searchParams }: { params: {
   const support = isSupport(r);
   const statusLbl = (support && SUPPORT_LBL[r.status]) || LBL[r.status];
 
-  const panels: ReactNode[] = [];
-  if (r.status === 'waiting') panels.push(<p key="w" style={{ margin: 0 }}><strong>Waiting on the client.</strong> They can reply in their portal. If they answered by email or phone, paste it below and choose &quot;Log as the client&apos;s answer&quot;.</p>);
-  if (r.status === 'delivered') panels.push(<p key="d" style={{ margin: 0 }}><strong>{support ? 'Resolved.' : 'Delivered.'}</strong> The client can {support ? 'confirm the fix' : 'accept it'} in their portal. It closes on its own after {fmtWhen(r.autoAcceptAt)}.</p>);
-  if (support && r.status === 'scoped') panels.push(<p key="own" style={{ margin: 0, color: 'var(--stop)' }}><strong>This support ticket needs an owner.</strong> No implementer had capacity when it came in. Assign someone below.</p>);
-  if (can('triage')) {
-    const skuSel = r.ai?.skuId ?? r.skuId, priSel = r.ai?.priority ?? r.priority;
-    panels.push(
-      <div key="tri" className="form">
-        <h3>Triage</h3>
+  const project = org?.billingModel === 'project';
+  const catalog = [...L.skus.values()].filter((k) => k.active && isCatalogSku(k) && (k.platform === 'Any' || k.platform === org?.platform));
+  const assignForm = (title: string): ReactNode => (
+    <div className="form" id="assign">
+      <h3>{title}</h3>
+      {r.needsLead ? <p className="small" style={{ margin: 0, color: 'var(--stop)' }}>Routing found no one with capacity. Pick someone, or add capacity in Setup.</p> : null}
+      <form action={A.assignAction} className="form">
+        {hidden}
+        <div className="two">
+          <label className="f">Implementer<select name="assigneeId" defaultValue={r.assigneeId ?? ''} required><option value="" disabled>Pick someone</option>{implementers.map((p) => <option key={p.id} value={p.id}>{load(p, open.get(p.id) ?? 0)}</option>)}</select></label>
+          {support ? <div /> : <label className="f">QA reviewer<select name="qaId" defaultValue={r.qaId ?? ''}><option value="">Keep current</option>{reviewers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
+        </div>
+        <div className="row"><Submit className="btn sig">Save assignment</Submit>{r.status === 'scoped' ? <Submit className="btn ghost" name="auto" value="1" skipChecks>Let Mainline pick</Submit> : null}</div>
+      </form>
+    </div>
+  );
+
+  // The one thing that moves this request forward, for this person, right now.
+  let next: ReactNode = null;
+  if (can('confirm')) {
+    const skuSel = r.ai?.skuId && L.skus.has(r.ai.skuId) ? r.ai.skuId : r.skuId;
+    const priSel = r.ai?.priority ?? r.priority;
+    const base = L.skus.get(skuSel);
+    next = (
+      <div className="stack">
+        <h2 style={{ margin: 0 }}>Confirm and schedule</h2>
         {r.ai ? (
           <div className="ai"><strong>AI suggests: {L.skus.get(r.ai.skuId ?? '')?.name ?? 'Custom scope'}</strong> <span className="muted small">({Math.round(r.ai.confidence * 100)}% match, {PRI[r.ai.priority].label})</span>
             {r.ai.summary ? <p style={{ margin: '6px 0 0' }}>{r.ai.summary}</p> : null}
             {r.ai.missing.length ? <ul>{r.ai.missing.map((q) => <li key={q}>{q}</li>)}</ul> : null}
           </div>
         ) : null}
-        <form action={A.triageAction} className="form">
+        <form action={A.confirmAction} className="form">
           {hidden}
           <div className="two">
-            <label className="f">Service<select name="skuId" defaultValue={skuSel}>{[...L.skus.values()].filter((k) => k.active && isCatalogSku(k) && (k.platform === 'Any' || k.platform === org?.platform)).map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}</select></label>
+            <label className="f">Service<select name="skuId" defaultValue={skuSel}>{catalog.map((k) => <option key={k.id} value={k.id}>{k.name}{project ? '' : ` (${k.credits} cr)`}</option>)}</select></label>
             <label className="f">Priority<select name="priority" defaultValue={priSel}>{(Object.keys(PRI) as (keyof typeof PRI)[]).map((k) => <option key={k} value={k}>{PRI[k].label}</option>)}</select></label>
           </div>
-          <div className="row"><Submit>Confirm triage</Submit></div>
+          <details className="tweak">
+            <summary>Adjust credits, turnaround or estimate (optional)</summary>
+            <p className="small muted" style={{ margin: '6px 0' }}>Leave blank to use the service&apos;s standard numbers{base ? ` (${project ? '' : `${base.credits} credits, `}${slaHoursFor(base, priSel)} ${clockWord(s)}, ${base.estHours} estimated hours)` : ''}.</p>
+            <div className="three">
+              {project ? <input type="hidden" name="credits" value="0" /> : <label className="f">Credits<input type="number" name="credits" min={0} placeholder={String(base?.credits ?? '')} /></label>}
+              <label className="f">Turnaround ({clockWord(s)})<input type="number" name="slaHours" min={1} placeholder={base ? String(slaHoursFor(base, priSel)) : ''} /></label>
+              <label className="f">Estimated hours<input type="number" name="estHours" min={0} step={0.5} placeholder={String(base?.estHours ?? '')} /></label>
+            </div>
+          </details>
+          <p className="small muted" style={{ margin: 0 }}>{project ? `Counts toward ${org?.contractedHours} total project hours.` : `${org?.name} has ${org?.credits ?? 0} credits.`} This starts the clock and routes the work to the best implementer and a QA reviewer.</p>
+          <div className="row"><Submit className="btn sig">Confirm and schedule</Submit>{llmEnabled() ? <Submit className="btn ghost sm" name="ai" value="1" skipChecks>{r.ai ? 'Ask AI again' : 'Ask AI to suggest'}</Submit> : null}</div>
         </form>
-        {llmEnabled() ? <form action={A.runAiAction}>{hidden}<Submit className="btn ghost sm">{r.ai ? 'Run AI triage again' : 'Run AI triage'}</Submit></form> : null}
-      </div>,
+      </div>
     );
-  }
-  if (can('scope')) {
-    panels.push(
-      <form key="scope" action={A.scopeAction} className="form">
+  } else if (r.status === 'scoped' && can('assign')) {
+    next = assignForm(support ? 'This ticket needs an owner' : 'This request needs an owner');
+  } else if (can('start')) {
+    next = (
+      <div className="row nextrow">
+        <div><h2 style={{ margin: 0 }}>Ready to start</h2><p className="small muted" style={{ margin: '4px 0 0' }}>{r.assigneeId === v.id ? 'This is assigned to you.' : `Assigned to ${people(r.assigneeId)}.`} Starting tells the client it is underway.</p></div>
+        <form action={A.startAction}>{hidden}<Submit className="btn sig">{support ? 'Start on this ticket' : 'Start work'}</Submit></form>
+      </div>
+    );
+  } else if (can('resolve')) {
+    next = (
+      <form action={A.resolveAction} className="form">
         {hidden}
-        <h3>Scope and assign</h3>
-        <p className="small muted" style={{ margin: 0 }}>{org?.billingModel === 'project' ? `Work counts toward ${org.contractedHours} total project hours; no monthly credits are debited.` : `${org?.name} has ${org?.credits ?? 0} credits. Scoping debits credits.`} Starts the resolution clock ({clockWord(s)}) and routes to the best implementer.</p>
-        <div className="three">
-          {org?.billingModel === 'project' ? <input type="hidden" name="credits" value="0"/> : <label className="f">Credits<input type="number" name="credits" min={0} defaultValue={sku?.credits ?? 0} /></label>}
-          <label className="f">SLA ({clockWord(s)})<input type="number" name="slaHours" min={1} defaultValue={slaHoursFor(sku, r.priority)} /></label>
-          <label className="f">Estimated hours<input type="number" name="estHours" min={0} step={0.5} defaultValue={sku?.estHours ?? 0} /></label>
-        </div>
-        <div><Submit>Scope and assign</Submit></div>
-      </form>,
-    );
-  }
-  if (can('assign') || can('reassign')) {
-    panels.push(
-      <div key="assign" className="form" id="assign">
-        <h3>{r.status === 'scoped' ? 'Assign' : 'Reassign'}</h3>
-        {r.needsLead ? <p className="small" style={{ margin: 0, color: 'var(--stop)' }}>Routing found no one with capacity. Pick someone or add capacity in Setup.</p> : null}
-        <form action={A.assignAction} className="form">
-          {hidden}
-          <div className="two">
-            <label className="f">Implementer<select name="assigneeId" defaultValue={r.assigneeId ?? ''} required><option value="" disabled>Pick someone</option>{implementers.map((p) => <option key={p.id} value={p.id}>{load(p, open.get(p.id) ?? 0)}</option>)}</select></label>
-            {support ? <div /> : <label className="f">QA reviewer<select name="qaId" defaultValue={r.qaId ?? ''}><option value="">Keep current</option>{reviewers.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>}
-          </div>
-          <div className="row"><Submit>Save assignment</Submit></div>
-        </form>
-        {r.status === 'scoped' ? <form action={A.autoAssignAction}>{hidden}<Submit className="btn ghost sm">Try auto-assign</Submit></form> : null}
-      </div>,
-    );
-  }
-  const buttons: ReactNode[] = [];
-  if (can('start')) buttons.push(<form key="start" action={A.startAction}>{hidden}<Submit>{support ? 'Start on this ticket' : 'Start work'}</Submit></form>);
-  if (can('submitqa')) buttons.push(<form key="qa" action={A.submitQaAction}>{hidden}<Submit confirmText={logged ? undefined : 'No time is logged on this request yet. Submit for QA anyway?'}>Submit for QA</Submit></form>);
-  if (can('resume')) buttons.push(<form key="resume" action={A.resumeAction}>{hidden}<Submit className="btn ghost">Resume without an answer</Submit></form>);
-  if (can('accept')) buttons.push(<form key="acc" action={A.acceptAction}>{hidden}<Submit className="btn sig">{support ? 'Client confirmed the fix' : 'Record client sign-off'}</Submit></form>);
-  if (can('autoclose')) buttons.push(<form key="ac" action={A.autoCloseAction}>{hidden}<Submit className="btn ghost">Close (no response in 5 days)</Submit></form>);
-  if (can('clearflag')) buttons.push(<form key="cf" action={A.clearFlagAction}>{hidden}<Submit className="btn ghost">Mark concern resolved</Submit></form>);
-  if (can('cancel')) buttons.push(<form key="cancel" action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={`Cancel this request?${r.credits ? ` ${r.credits} credits go back to the client.` : ''}`}>{support ? 'Withdraw ticket' : 'Cancel request'}</Submit></form>);
-  if (buttons.length) panels.push(<div key="btns" className="row">{buttons}</div>);
-  if (can('resolve')) {
-    panels.push(
-      <form key="resolve" action={A.resolveAction} className="form">
-        {hidden}
-        <h3>Resolve this ticket</h3>
+        <h2 style={{ margin: 0 }}>Resolve this ticket</h2>
         <label className="f">What did you fix or answer? The client sees this.<textarea name="body" required placeholder="What was wrong, what you changed, and anything they should do now." /></label>
         <div className="row"><Submit className="btn sig" confirmText={logged ? undefined : 'No time is logged on this ticket yet. Resolve anyway?'}>Mark resolved</Submit></div>
-      </form>,
+      </form>
     );
-  }
-  if (can('qa')) {
-    panels.push(
-      <form key="qaf" action={A.passQaAction} className="form">
-        {hidden}
-        <h3>QA checklist</h3>
-        <div className="checks">
-          {(sku?.qa ?? []).map((q, i) => <label key={i}><input type="checkbox" name="qa" value={String(i)} /><span>{q}</span></label>)}
-          {!sku?.qa.length ? <span className="muted small">No checklist on this service. Add one in Setup.</span> : null}
-        </div>
-        <label className="f">Delivery note for the client (optional)<textarea name="body" placeholder="What changed and where to find it. Include the walkthrough video link." /></label>
-        <div className="row"><Submit className="btn sig">Pass QA and deliver</Submit></div>
-      </form>,
-      <form key="qafail" action={A.failQaAction} className="form">
-        {hidden}
-        <label className="f">Or return it with notes for the implementer<textarea name="body" /></label>
-        <div><Submit className="btn warn">Return to implementer</Submit></div>
-      </form>,
+  } else if (can('submitqa')) {
+    next = (
+      <div className="row nextrow">
+        <div><h2 style={{ margin: 0 }}>When the work is done</h2><p className="small muted" style={{ margin: '4px 0 0' }}>{people(r.qaId)} reviews it against the checklist before the client sees it.</p></div>
+        <form action={A.submitQaAction}>{hidden}<Submit className="btn sig" confirmText={logged ? undefined : 'No time is logged on this request yet. Submit for QA anyway?'}>Submit for QA</Submit></form>
+      </div>
     );
+  } else if (can('qa')) {
+    next = (
+      <div className="stack">
+        <form action={A.passQaAction} className="form">
+          {hidden}
+          <h2 style={{ margin: 0 }}>QA review</h2>
+          <div className="checks">
+            {(sku?.qa ?? []).map((q, i) => <label key={i}><input type="checkbox" name="qa" value={String(i)} /><span>{q}</span></label>)}
+            {!sku?.qa.length ? <span className="muted small">No checklist on this service. Add one in Setup.</span> : null}
+          </div>
+          <label className="f">Delivery note for the client (optional)<textarea name="body" placeholder="What changed and where to find it. Paste the walkthrough Loom link." /></label>
+          <div className="row"><Submit className="btn sig">Pass QA and deliver</Submit></div>
+        </form>
+        <details className="tweak">
+          <summary>Needs fixes? Return it to {people(r.assigneeId)}</summary>
+          <form action={A.failQaAction} className="form" style={{ marginTop: 8 }}>
+            {hidden}
+            <label className="f">What needs fixing<textarea name="body" required /></label>
+            <div><Submit className="btn warn">Return to implementer</Submit></div>
+          </form>
+        </details>
+      </div>
+    );
+  } else if (r.status === 'waiting') {
+    next = <p style={{ margin: 0 }}><strong>Waiting on the client.</strong> The clock is paused. They can reply in their portal; if they answered by email or phone, paste it in the message box and choose <em>Log as the client&apos;s answer</em>.</p>;
+  } else if (r.status === 'delivered') {
+    next = <p style={{ margin: 0 }}><strong>{support ? 'Resolved.' : 'Delivered.'}</strong> Waiting for the client to {support ? 'confirm the fix' : 'accept it'}. It closes on its own after {fmtWhen(r.autoAcceptAt)}.</p>;
+  } else if (WORKING.includes(r.status) && r.assigneeId) {
+    next = <p style={{ margin: 0 }}><strong>{statusLbl}</strong> with {people(r.assigneeId)}.</p>;
   }
+
+  // Everything else lives under More actions.
+  const more: ReactNode[] = [];
+  if (can('reassign') && !(r.status === 'scoped')) more.push(<div key="re">{assignForm('Reassign')}</div>);
+  if (can('resume')) more.push(<form key="resume" action={A.resumeAction}>{hidden}<Submit className="btn ghost">Resume without an answer</Submit></form>);
+  if (can('accept')) more.push(<form key="acc" action={A.acceptAction}>{hidden}<Submit className="btn ghost">{support ? 'Client confirmed the fix' : 'Record client sign-off'}</Submit></form>);
+  if (can('autoclose')) more.push(<form key="ac" action={A.autoCloseAction}>{hidden}<Submit className="btn ghost">Close (no response in 5 days)</Submit></form>);
+  if (can('clearflag')) more.push(<form key="cf" action={A.clearFlagAction}>{hidden}<Submit className="btn ghost">Mark concern resolved</Submit></form>);
+  if (can('flag')) more.push(
+    <form key="flag" action={A.flagAction} className="form">
+      {hidden}
+      <label className="f">Client unhappy?<input type="text" name="body" required placeholder="What they said" /></label>
+      <div><Submit className="btn warn sm">Flag a client concern to leadership</Submit></div>
+    </form>,
+  );
+  if (can('cancel')) more.push(<form key="cancel" action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={`Cancel this request?${r.credits ? ` ${r.credits} credits go back to the client.` : ''}`}>{support ? 'Withdraw ticket' : 'Cancel request'}</Submit></form>);
 
   return (
     <>
-      <Link className="back" href="/app">Back to queue</Link>
+      <Link className="back" href="/app">Home</Link>
       <Flash sp={searchParams} />
       <div className="head">
         <div><div className="muted" style={{ fontFamily: 'var(--display)', fontWeight: 600 }}>ML-{r.num}, {org ? <Link href={`/app/clients/${org.id}`}>{org.name}</Link> : null}</div><h1>{r.title}</h1></div>
@@ -150,46 +176,11 @@ export default async function StaffRequest({ params, searchParams }: { params: {
       <div className="panel" style={{ marginBottom: 14 }}><Line r={r} full /></div>
       <div className="grid2">
         <div className="stack">
-          {panels.length ? <section className="panel stack">{panels}</section> : null}
+          {next ? <section className="panel stack next">{next}</section> : null}
           <section className="panel stack"><h2>Details</h2><p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description ? <Linkify text={r.description} /> : 'No description provided.'}</p></section>
-          <AttachmentsPanel items={d.attachments} v={v} requestId={r.id} back={back} canAdd={can('comment')} />
-          <section className="panel stack">
-            <h2>Conversation</h2>
-            <div className="thread">
-              {d.comments.map((c) => (
-                <div key={c.id} className={`msg${c.internal ? ' internal' : ''}${c.fromClient ? ' client' : ''}`}>
-                  <div className="by">{c.authorName}, {fmtWhen(c.at)}{c.internal ? ', internal note' : c.fromClient ? ', client' : ''}</div>
-                  <p><Linkify text={c.body} /></p>
-                </div>
-              ))}
-              {!d.comments.length ? <p className="muted" style={{ margin: 0 }}>No messages yet.</p> : null}
-            </div>
-            {can('comment') ? (
-              <form action={A.commentAction} className="form">
-                {hidden}
-                <label className="f">Message<textarea name="body" required placeholder={r.status === 'waiting' ? "Paste the client's answer, or write a note" : 'Message the client, or add an internal note for the team'} /></label>
-                <div className="row">
-                  <label className="small" style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="checkbox" name="internal" /> Internal note (client can&apos;t see)</label>
-                  <Submit>Post</Submit>
-                  {can('clientReply') ? <Submit className="btn sig" name="mode" value="clientAnswer">Log as the client&apos;s answer</Submit> : null}
-                </div>
-              </form>
-            ) : null}
-            {can('ask') ? (
-              <form action={A.askAction} className="form">
-                {hidden}
-                <label className="f">Need something from the client?<textarea name="body" required placeholder="Ask your question. The client is emailed and the SLA pauses until they reply." /></label>
-                <div><Submit className="btn ghost">Ask the client (pauses SLA)</Submit></div>
-              </form>
-            ) : null}
-            {can('flag') ? (
-              <form action={A.flagAction} className="form">
-                {hidden}
-                <label className="f">Client unhappy?<input type="text" name="body" required placeholder="What they said" /></label>
-                <div><Submit className="btn warn sm">Flag a client concern to leadership</Submit></div>
-              </form>
-            ) : null}
-          </section>
+          <Conversation v={v} requestId={r.id} back={back} comments={d.comments} attachments={d.attachments}
+            canComment={can('comment')} canAsk={can('ask')} canClientReply={can('clientReply')}
+            placeholder={r.status === 'waiting' ? "Paste the client's answer and choose Log as the client's answer, or write a note" : undefined} />
           <section className="panel stack">
             <div className="row" style={{ justifyContent: 'space-between' }}><h2 style={{ margin: 0 }}>Time</h2><span className="small muted">{hrs(logged)}h logged{est ? ` of ${hrs(est)}h estimated` : ''}</span></div>
             {est ? <div className={`meter ${logged > est * 1.2 ? 'hot' : logged > est ? 'warm' : ''}`}><i style={{ width: `${Math.min(100, (logged / est) * 100)}%` }} /></div> : null}
@@ -233,6 +224,9 @@ export default async function StaffRequest({ params, searchParams }: { params: {
               <div><dt>Submitted</dt><dd>{fmtWhen(r.createdAt)}</dd></div>
             </dl>
           </section>
+          {more.length ? (
+            <details className="more"><summary>More actions</summary><div className="stack" style={{ marginTop: 12 }}>{more}</div></details>
+          ) : null}
           <section className="panel">
             <details><summary>Activity ({d.events.length})</summary>
               <ul className="log">{d.events.map((e) => <li key={e.id}><strong style={{ color: 'var(--ink)' }}>{e.actorName}</strong>: {e.text}<br />{fmtWhen(e.at)}</li>)}</ul>

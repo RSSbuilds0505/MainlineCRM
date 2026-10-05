@@ -37,13 +37,13 @@ export function Line({ r, full }: { r: Request; full?: boolean }): ReactNode {
   const line = support ? SUPPORT_LINE : LINE;
   const label = (st: (typeof LINE)[number]): string => (support ? SUPPORT_LBL[st] ?? LBL[st] : LBL[st]);
   // A ticket waiting for a lead sits at "scoped"; show it at the first stop.
-  const cur = r.status === 'waiting' || (support && r.status === 'qa') ? 'in_progress' : support && !line.includes(r.status) ? 'assigned' : r.status;
+  const cur = r.status === 'waiting' || (support && r.status === 'qa') ? 'in_progress' : r.status === 'triaged' ? 'submitted' : r.status === 'scoped' || (support && !line.includes(r.status)) ? 'assigned' : r.status;
   const idx = line.indexOf(cur);
   return (
     <ol className={`line${full ? ' full' : ''}`} aria-label={`Progress: ${label(r.status)}`}>
       {line.map((st, i) => {
         const c = i < idx ? 'past' : i === idx ? `now${r.status === 'waiting' ? ' hold' : ''}` : 'next';
-        const l = i === idx && r.status === 'waiting' ? LBL.waiting : i === idx && support && r.status === 'scoped' ? 'Needs an owner' : label(st);
+        const l = i === idx && r.status === 'waiting' ? LBL.waiting : i === idx && r.status === 'scoped' ? 'Needs an owner' : label(st);
         return <li key={st} className={c}><span className="stop" /><span className="lbl">{l}</span></li>;
       })}
     </ol>

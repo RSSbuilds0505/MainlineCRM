@@ -37,7 +37,9 @@ export default async function Board({ searchParams: sp }: { searchParams: SP }):
   if (sp.kind === 'service') rs = rs.filter((r) => !isSupport(r));
   if (sp.risk) rs = rs.filter((r) => (sla(r, s)?.level ?? 0) >= Number(sp.risk));
   if (sp.src === 'portal') rs = rs.filter((r) => r.source === 'Client portal');
-  const cols: Status[] = ['submitted', 'triaged', 'scoped', 'assigned', 'in_progress', 'waiting', 'qa', 'delivered'];
+  // One column per stage people talk about; triaged sits with New.
+  const cols: Status[] = ['submitted', 'scoped', 'assigned', 'in_progress', 'waiting', 'qa', 'delivered'];
+  const inCol = (r: Request, c: Status): boolean => r.status === c || (c === 'submitted' && r.status === 'triaged');
 
   const quick: [string, Change, boolean][] = [
     ['Everything', { kind: undefined, risk: undefined, src: undefined }, !sp.kind && !sp.risk && !sp.src],
@@ -81,8 +83,9 @@ export default async function Board({ searchParams: sp }: { searchParams: SP }):
       ) : null}
       <div className="board">
         {cols.map((c) => {
-          const items = rs.filter((r) => r.status === c).sort((a, b) => riskScore(b, s) - riskScore(a, s));
-          if (sp.kind === 'support' && !items.length && ['submitted', 'triaged', 'qa'].includes(c)) return null;
+          const items = rs.filter((r) => inCol(r, c)).sort((a, b) => riskScore(b, s) - riskScore(a, s));
+          if (sp.kind === 'support' && !items.length && ['submitted', 'qa'].includes(c)) return null;
+          if (c === 'scoped' && !items.length) return null;
           return (
             <div className="col" key={c}>
               <h3><span>{sp.kind === 'support' ? SUPPORT_LBL[c] ?? LBL[c] : LBL[c]}</span><span className="muted">{items.length}</span></h3>

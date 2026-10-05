@@ -1,26 +1,18 @@
 import type { ReactNode } from 'react';
-import { eq } from 'drizzle-orm';
-import { getDb } from '@/lib/db';
-import { orgs } from '@/lib/db/schema';
+import { redirect } from 'next/navigation';
 import { requireClient } from '@/lib/auth';
-import Link from 'next/link';
-import { lookups } from '@/lib/queries';
-import { isCatalogSku } from '@/lib/core';
-import { llmEnabled } from '@/lib/llm';
 import { Flash, Head } from '@/components/ui';
-import { ClientRequestForm } from '@/components/request-form';
+import { NewChooser } from '@/components/new-chooser';
 
 export default async function PortalNew({ searchParams }: { searchParams: Record<string, string | undefined> }): Promise<ReactNode> {
-  const v = await requireClient();
-  const db = getDb();
-  const [[org], L] = await Promise.all([db.select().from(orgs).where(eq(orgs.id, v.orgId!)), lookups(db)]);
-  const skus = [...L.skus.values()].filter((k) => k.active && isCatalogSku(k) && (k.platform === 'Any' || k.platform === org.platform));
+  await requireClient();
+  // A service picked from the Services page goes straight to the request form.
+  if (searchParams.sku) redirect(`/portal/new/request?sku=${encodeURIComponent(searchParams.sku)}`);
   return (
     <>
       <Flash sp={searchParams} />
-      <Head title="New request" sub={org.billingModel === 'project' ? 'Work is tracked against your total project hours. Monthly credits do not apply.' : `${org.credits} credits available. Credits are only used once your team confirms the scope, and you can cancel before work starts.`} />
-      <div className="callout"><span>Something broken, or have a question? Open a support ticket instead. Support never uses credits.</span><Link className="btn ghost sm" href="/portal/support/new">Get support</Link></div>
-      <ClientRequestForm project={org.billingModel === 'project'} skus={skus} aiOn={llmEnabled()} preselect={searchParams.sku} />
+      <Head title="New" sub="Tell us what you need. Pick the one that fits best; your team can always move it." />
+      <NewChooser base="/portal/new" client />
     </>
   );
 }

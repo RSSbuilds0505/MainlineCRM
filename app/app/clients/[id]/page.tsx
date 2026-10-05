@@ -38,8 +38,8 @@ export default async function ClientPage({ params }: { params: { id: string } })
       <Link className="back" href="/app/clients">All clients</Link>
       <Head title={org.name} sub={`${org.platform}, ${org.plan} plan${pod ? `, ${pod.name}` : ''}${org.active ? '' : ' (paused)'}`}>
         <div className="row">
-          {isCsmRole(v.role) ? <Link className="btn ghost" href={`/app/support/new?org=${org.id}`}>Log support ticket</Link> : null}
-          {isCsmRole(v.role) ? <Link className="btn sig" href={`/app/new?org=${org.id}`}>New request</Link> : null}
+          {isCsmRole(v.role) ? <Link className="btn ghost" href={`/app/new/support?org=${org.id}`}>Log support ticket</Link> : null}
+          {isCsmRole(v.role) ? <Link className="btn sig" href={`/app/new/request?org=${org.id}`}>New request</Link> : null}
         </div>
       </Head>
       <ProjectBudget summary={budget} />

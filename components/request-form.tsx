@@ -10,7 +10,7 @@ export function ClientRequestForm({ skus, aiOn, preselect, project = false }: { 
   for (const k of skus) groups.set(k.category, [...(groups.get(k.category) ?? []), k]);
   return (
     <form id="nr" action={createRequestAction} className="stack">
-      <input type="hidden" name="back" value="/portal/new" />
+      <input type="hidden" name="back" value="/portal/new/request" />
       <div className="panel form">
         <label className="f">Title<input type="text" name="title" required maxLength={160} placeholder="Build a lead routing workflow for the West region" /></label>
         <label className="f">What do you need?<textarea name="description" maxLength={8000} placeholder="What should change, where in your CRM, who is affected, and any deadline." /></label>
@@ -55,7 +55,7 @@ export function StaffRequestForm({ orgs, org, skus, aiOn, canTriage }: { orgs: O
         <button type="submit" className="btn ghost" style={{ alignSelf: 'end' }}>Switch client</button>
       </form>
       <form id="nr" action={createRequestAction} className="panel form">
-        <input type="hidden" name="back" value="/app/new" />
+        <input type="hidden" name="back" value="/app/new/request" />
         <input type="hidden" name="orgId" value={org.id} />
         <p className="small muted" style={{ margin: 0 }}>Logging for <strong>{org.name}</strong> on {org.platform}, {org.billingModel === 'project' ? `${org.contractedHours} total project hours` : `${org.credits} credits left`}.</p>
         <div className="two">
@@ -74,7 +74,7 @@ export function StaffRequestForm({ orgs, org, skus, aiOn, canTriage }: { orgs: O
             <select name="priority" defaultValue="normal">{(Object.keys(PRI) as (keyof typeof PRI)[]).map((k) => <option key={k} value={k}>{PRI[k].label}</option>)}</select>
           </label>
         </div>
-        {canTriage ? <label className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" name="triageNow" defaultChecked /> I have confirmed the service and priority (skip triage)</label> : null}
+        {canTriage ? <label className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}><input type="checkbox" name="triageNow" defaultChecked /> Schedule it now with the service&apos;s standard numbers (uncheck to review it first)</label> : null}
         <div className="row"><Submit className="btn sig">Log request</Submit></div>
       </form>
     </div>

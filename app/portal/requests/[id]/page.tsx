@@ -9,7 +9,7 @@ import { PRI, clientStatus, isSupport, supportCategoryLabel } from '@/lib/core';
 import { ClientLine, Flash, Linkify, fmtWhen } from '@/components/ui';
 import { Submit } from '@/components/client';
 import * as A from '@/app/actions';
-import { AttachmentsPanel } from '@/components/attachments';
+import { Conversation } from '@/components/attachments';
 
 export default async function PortalRequest({ params, searchParams }: { params: { id: string }; searchParams: Record<string, string | undefined> }): Promise<ReactNode> {
   const v = await requireClient();
@@ -24,9 +24,10 @@ export default async function PortalRequest({ params, searchParams }: { params: 
   const hidden = (<><input type="hidden" name="id" value={r.id} /><input type="hidden" name="back" value={back} />{isSupport(r) ? <input type="hidden" name="support" value="1" /> : null}</>);
   const lastQuestion = [...d.comments].reverse().find((c) => !c.fromClient);
   const support = isSupport(r);
+  const project = L.orgs.get(r.orgId)?.billingModel === 'project';
   return (
     <>
-      <Link className="back" href="/portal">Back to requests</Link>
+      <Link className="back" href="/portal">My requests</Link>
       <Flash sp={searchParams} />
       <div className="head">
         <div><div className="muted" style={{ fontFamily: 'var(--display)', fontWeight: 600 }}>ML-{r.num}</div><h1>{r.title}</h1></div>
@@ -44,7 +45,7 @@ export default async function PortalRequest({ params, searchParams }: { params: 
                 <label className="f">Your answer<textarea name="body" required /></label>
                 <div><Submit className="btn sig">Send answer</Submit></div>
               </form>
-              <p className="small muted" style={{ margin: 0 }}>Work picks up again as soon as you reply.</p>
+              <p className="small muted" style={{ margin: 0 }}>Work picks up again as soon as you reply. To add a screenshot, use Attach in the conversation below.</p>
             </section>
           ) : null}
           {can('accept') ? (
@@ -65,35 +66,7 @@ export default async function PortalRequest({ params, searchParams }: { params: 
             <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{r.description ? <Linkify text={r.description} /> : 'No description provided.'}</p>
             {r.ai?.summary ? <div className="ai"><strong>Scope summary</strong><p style={{ margin: '4px 0 0' }}>{r.ai.summary}</p></div> : null}
           </section>
-          <AttachmentsPanel items={d.attachments} v={v} requestId={r.id} back={back} canAdd={can('comment')} />
-          <section className="panel stack">
-            <h2>Conversation</h2>
-            <div className="thread">
-              {d.comments.map((c) => (
-                <div key={c.id} className={`msg${c.fromClient ? ' client' : ''}`}><div className="by">{c.authorName}, {fmtWhen(c.at)}</div><p><Linkify text={c.body} /></p></div>
-              ))}
-              {!d.comments.length ? <p className="muted" style={{ margin: 0 }}>No messages yet. Your team will post updates here.</p> : null}
-            </div>
-            {can('comment') && r.status !== 'waiting' ? (
-              <form action={A.commentAction} className="form">
-                {hidden}
-                <label className="f">Message your team<textarea name="body" required /></label>
-                <div><Submit>Send</Submit></div>
-              </form>
-            ) : null}
-          </section>
-          {(can('cancel') || can('flag')) ? (
-            <section className="panel stack">
-              {can('cancel') ? <form action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={support ? 'Withdraw this ticket?' : `Cancel this request?${r.credits ? ` Its ${r.credits} credits go back to your balance.` : ''}`}>{support ? 'Withdraw this ticket' : 'Cancel this request'}</Submit></form> : null}
-              {can('flag') ? (
-                <form action={A.flagAction} className="form">
-                  {hidden}
-                  <label className="f">Not happy with how this is going?<input type="text" name="body" required placeholder="Tell us what went wrong" /></label>
-                  <div><Submit className="btn warn sm">Raise a concern with leadership</Submit></div>
-                </form>
-              ) : null}
-            </section>
-          ) : null}
+          <Conversation v={v} requestId={r.id} back={back} comments={d.comments} attachments={d.attachments} canComment={can('comment') && r.status !== 'waiting'} />
         </div>
         <aside className="stack">
           <section className="panel">
@@ -101,13 +74,28 @@ export default async function PortalRequest({ params, searchParams }: { params: 
               <div><dt>{support ? 'Type' : 'Service'}</dt><dd>{support ? `Support: ${supportCategoryLabel(r.category)}` : sku?.name}</dd></div>
               <div><dt>Priority</dt><dd>{PRI[r.priority].label}</dd></div>
               <div><dt>Status</dt><dd>{clientStatus(r)}</dd></div>
-              <div><dt>Credits</dt><dd>{support ? 'None, support is included' : r.scopedAt ? r.credits : 'Confirmed at scoping'}</dd></div>
+              <div><dt>{project ? 'Billing' : 'Credits'}</dt><dd>{support ? 'None, support is included' : project ? 'Counts toward your project hours' : r.scopedAt ? r.credits : 'Confirmed when scheduled'}</dd></div>
               <div><dt>Specialist</dt><dd>{r.assigneeId ? L.people.get(r.assigneeId)?.name : 'Being assigned'}</dd></div>
               <div><dt>Submitted by</dt><dd>{r.submittedByName}</dd></div>
               <div><dt>Submitted</dt><dd>{fmtWhen(r.createdAt)}</dd></div>
               {r.closedAt ? <div><dt>Completed</dt><dd>{fmtWhen(r.closedAt)}</dd></div> : null}
             </dl>
           </section>
+          {(can('cancel') || can('flag')) ? (
+              <details className="more"><summary>More actions</summary>
+                <div className="stack" style={{ marginTop: 12 }}>
+                  {can('flag') ? (
+                    <form action={A.flagAction} className="form">
+                      {hidden}
+                      <label className="f">Not happy with how this is going?<input type="text" name="body" required placeholder="Tell us what went wrong" /></label>
+                      <div><Submit className="btn warn sm">Raise a concern with leadership</Submit></div>
+                    </form>
+                  ) : null}
+                  {can('cancel') ? <form action={A.cancelAction}>{hidden}<Submit className="btn warn" confirmText={support ? 'Withdraw this ticket?' : `Cancel this request?${r.credits ? ` Its ${r.credits} credits go back to your balance.` : ''}`}>{support ? 'Withdraw this ticket' : 'Cancel this request'}</Submit></form> : null}
+                </div>
+              </details>
+            
+          ) : null}
         </aside>
       </div>
     </>

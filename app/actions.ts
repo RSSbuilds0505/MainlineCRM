@@ -17,6 +17,7 @@ import { supabaseServer } from '@/lib/supabase/server';
 import { isLeadRole, isStaffRole, MIN_PASSWORD, PLATFORMS } from '@/lib/core';
 import * as wf from '@/lib/workflow';
 import { store } from '@/lib/storage';
+import { videoEmbed } from '@/lib/media';
 import { applyMigrations } from '@/lib/setup';
 
 const s = (fd: FormData, k: string): string => String(fd.get(k) ?? '').trim();
@@ -141,8 +142,14 @@ export async function createRequestAction(fd: FormData): Promise<never> {
       }
     }
     await attachFromForm(db, v, res.value, fd);
+    // "Schedule it now": confirm with the service's standard numbers in the same click. If that cannot happen
+    // (for example, not enough credits), the request is still saved and waits on its page for Confirm and schedule.
+    if (b(fd, 'triageNow') && v.role !== 'client') {
+      try { const c = await wf.confirmAndSchedule(db, v, res.value, { skuId: s(fd, 'skuId'), priority: (s(fd, 'priority') || 'normal') as Priority }); await deliver(c.out); }
+      catch (e) { if (!(e instanceof wf.UserError)) console.error('[request] schedule on entry failed', e); }
+    }
     return res;
-  }, 'Request submitted.', (id) => (typeof id === 'string' ? `${isClientPath(back) ? '/portal' : '/app'}/requests/${id}` : undefined));
+  }, 'Request saved.', (id) => (typeof id === 'string' ? `${isClientPath(back) ? '/portal' : '/app'}/requests/${id}` : undefined));
 }
 const isClientPath = (p: string): boolean => p.startsWith('/portal');
 
@@ -168,6 +175,7 @@ export async function scopeAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.scope(db, v, s(fd, 'id'), { credits: n(fd, 'credits'), slaHours: n(fd, 'slaHours', 16), estHours: n(fd, 'estHours') }), 'Scoped and routed.');
 }
 export async function assignAction(fd: FormData): Promise<never> {
+  if (s(fd, 'auto') === '1') return autoAssignAction(fd);
   return run(safeBack(fd, '/app'), (db, v) => wf.assign(db, v, s(fd, 'id'), s(fd, 'assigneeId'), s(fd, 'qaId') || null), 'Assignment saved.');
 }
 export async function autoAssignAction(fd: FormData): Promise<never> {
@@ -182,11 +190,33 @@ export async function askAction(fd: FormData): Promise<never> {
 export async function resumeAction(fd: FormData): Promise<never> {
   return run(safeBack(fd, '/app'), (db, v) => wf.resume(db, v, s(fd, 'id')), 'Work resumed.');
 }
+/**
+ * The one message box. Plain message, internal note, a logged client answer, or (with "needs an answer")
+ * a question that pauses the clock. Loom, YouTube and Vimeo links in the message are also attached as players.
+ */
 export async function commentAction(fd: FormData): Promise<never> {
-  return run(safeBack(fd, '/'), (db, v) => wf.comment(db, v, s(fd, 'id'), s(fd, 'body'), { internal: b(fd, 'internal'), asClientAnswer: s(fd, 'mode') === 'clientAnswer' }), 'Posted.');
+  const ask = b(fd, 'needsAnswer') && s(fd, 'mode') !== 'clientAnswer';
+  return run(safeBack(fd, '/'), async (db, v) => {
+    const id = s(fd, 'id'), body = s(fd, 'body'), internal = !ask && b(fd, 'internal');
+    const res = ask
+      ? await wf.askClient(db, v, id, body)
+      : await wf.comment(db, v, id, body, { internal, asClientAnswer: s(fd, 'mode') === 'clientAnswer' });
+    const videos = [...new Set((body.match(/https:\/\/[^\s<>"']+/g) ?? []).map((u) => u.replace(/[).,;:!?\]]+$/, '')).filter((u) => !!videoEmbed(u)))].slice(0, 5);
+    for (const url of videos) {
+      try { await wf.addLink(db, v, id, url, internal, true); } catch (e) { console.error('[comment] could not attach video link', e); }
+    }
+    return res;
+  }, ask ? 'Question sent. The clock is paused until the client answers.' : 'Posted.');
+}
+export async function confirmAction(fd: FormData): Promise<never> {
+  if (s(fd, 'ai') === '1') return runAiAction(fd);
+  const opt = (k: string): number | null => { const x = s(fd, k); return x === '' ? null : Number(x); };
+  return run(safeBack(fd, '/app'), (db, v) => wf.confirmAndSchedule(db, v, s(fd, 'id'), {
+    skuId: s(fd, 'skuId'), priority: (s(fd, 'priority') || 'normal') as Priority, credits: opt('credits'), slaHours: opt('slaHours'), estHours: opt('estHours'),
+  }), 'Confirmed and scheduled.');
 }
 export async function supportTicketAction(fd: FormData): Promise<never> {
-  const back = safeBack(fd, '/portal/support/new');
+  const back = safeBack(fd, '/portal/new/support');
   return run(back, async (db, v) => {
     // Rate limit so a stuck form or script cannot flood the team.
     const lim = await allow(db, `ticket:${v.id}`, 20, 3600);

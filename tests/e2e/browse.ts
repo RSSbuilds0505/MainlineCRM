@@ -34,7 +34,8 @@ async function main(): Promise<void> {
 
   let p = await as(ctx, 'client');
   await p.goto(`${BASE}/`); await p.waitForURL('**/portal'); await shot(p, 'client-home-empty');
-  await p.goto(`${BASE}/portal/new`); await shot(p, 'client-new');
+  await p.goto(`${BASE}/portal/new`); await shot(p, 'client-new-chooser');
+  await p.click('a.pick:has-text("built or changed")'); await p.waitForURL('**/portal/new/request'); await shot(p, 'client-new');
   await p.fill('input[name=title]', 'Route new leads by region');
   await p.fill('textarea[name=description]', 'New inbound leads should go to the East or West rep based on state.');
   await p.locator('label.sku', { hasText: 'Workflow build or fix' }).click();
@@ -48,13 +49,14 @@ async function main(): Promise<void> {
   p = await as(ctx, 'csm');
   await p.goto(`${BASE}/app`); await shot(p, 'csm-queue');
   await p.goto(`${BASE}/app/requests/${reqId}`);
-  await p.click('button:has-text("Confirm triage")'); await p.waitForLoadState('networkidle'); console.log('triage:', await flash(p));
-  await p.click('button:has-text("Scope and assign")'); await p.waitForLoadState('networkidle'); console.log('scope:', await flash(p));
+  await shot(p, 'csm-confirm');
+  await p.click('button:has-text("Confirm and schedule")'); await p.waitForLoadState('networkidle'); console.log('confirm and schedule:', await flash(p));
   await shot(p, 'csm-after-scope');
   const assigneeName = (await p.locator('dt:has-text("Implementer") + dd').textContent())?.trim();
   const qaName = (await p.locator('dt:has-text("QA reviewer") + dd').textContent())?.trim();
   console.log('assigned to', assigneeName, 'qa', qaName);
-  await p.goto(`${BASE}/app/new`); await shot(p, 'csm-log-request');
+  await p.goto(`${BASE}/app/new`); await shot(p, 'csm-new-chooser');
+  await p.goto(`${BASE}/app/new/request`); await shot(p, 'csm-log-request');
   await p.fill('input[name=title]', 'Quarterly pipeline report');
   await p.selectOption('select[name=skuId]', 'hs-report');
   await p.fill('input[name=contact]', 'Amy Carter');
@@ -67,8 +69,9 @@ async function main(): Promise<void> {
   await p.goto(`${BASE}/app`); await shot(p, 'implementer-queue');
   await p.goto(`${BASE}/app/requests/${reqId}`);
   await p.click('button:has-text("Start work")'); await p.waitForLoadState('networkidle');
-  await p.fill('form:has(button:has-text("Ask the client")) textarea[name=body]', 'Which states count as East?');
-  await p.click('button:has-text("Ask the client")'); await p.waitForLoadState('networkidle'); console.log('ask:', await flash(p));
+  await p.fill('form.composer textarea[name=body]', 'Which states count as East?');
+  await p.locator('form.composer input[name=needsAnswer]').check(); await shot(p, 'implementer-composer');
+  await p.click('form.composer button:has-text("Send")'); await p.waitForLoadState('networkidle'); console.log('ask:', await flash(p));
   await p.close();
 
   p = await as(ctx, 'client');
@@ -121,6 +124,7 @@ async function main(): Promise<void> {
   p = await as(ctx, 'client');
   await p.setViewportSize({ width: 390, height: 844 });
   await p.goto(`${BASE}/portal/new`); await shot(p, 'mobile-client-new');
+  await p.locator('details.menu summary').click(); await shot(p, 'mobile-client-menu');
   await p.close();
 
   const lp = await ctx.newPage(); await ctx.clearCookies();

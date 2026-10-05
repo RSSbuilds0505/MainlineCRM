@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   const lp = await ctx.newPage(); await lp.goto(`${BASE}/login`); const png = await lp.screenshot(); await lp.close();
 
   let p = await as(ctx, 'client');
-  await p.goto(`${BASE}/portal/support/new`);
+  await p.goto(`${BASE}/portal/new/support`);
   await p.locator('label.choice', { hasText: 'Something is broken' }).click();
   await p.fill('input[name=title]', 'Lead form shows an error');
   await p.fill('textarea[name=description]', 'See the screenshot and the Loom. Details: https://example.com/form-page.');
@@ -61,11 +61,11 @@ async function main(): Promise<void> {
   await p.waitForFunction(() => document.querySelectorAll('.gallery .thumb img').length >= 2, null, { timeout: 15000 });
   console.log('pasted screenshot attached; images now:', await p.locator('.gallery .thumb img').count(), '| name:', (await p.locator('.gallery figcaption .nm').nth(2).textContent())?.trim());
   // Upload with the picker on the page, plus a PDF.
-  await p.locator('.attach input[type=file]').setInputFiles([{ name: 'notes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%test\n') }]);
+  await p.locator('.composer .attach input[type=file]').setInputFiles([{ name: 'notes.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%test\n') }]);
   await p.waitForFunction(() => document.querySelectorAll('.gallery .att').length >= 4, null, { timeout: 15000 });
   // A file type we refuse.
-  await p.locator('.attach input[type=file]').setInputFiles([{ name: 'page.html', mimeType: 'text/html', buffer: Buffer.from('<b>x</b>') }]);
-  console.log('refused html shows:', (await p.locator('.attach .err-text').textContent())?.trim());
+  await p.locator('.composer .attach input[type=file]').setInputFiles([{ name: 'page.html', mimeType: 'text/html', buffer: Buffer.from('<b>x</b>') }]);
+  console.log('refused html shows:', (await p.locator('.composer .attach .err-text').textContent())?.trim());
   await p.fill('form:has(button:has-text("Send")) textarea[name=body]', 'Here is the Zap run log: https://zapier.com/app/history/123');
   await p.click('button:has-text("Send")'); await p.waitForLoadState('networkidle');
   await shot(p, 'client-ticket-gallery');
@@ -74,12 +74,12 @@ async function main(): Promise<void> {
   p = await as(ctx, 'imp');
   await p.goto(`${BASE}/app/requests/${id}`);
   console.log('implementer sees attachments:', await p.locator('.gallery .att').count(), '| comment link clickable:', await p.locator('.thread a.autolink').count());
-  await p.fill('form.linkform input[name=url]', 'https://drive.google.com/file/d/abc123/view');
-  await p.locator('form.linkform input[name=internal]').check();
-  await p.click('form.linkform button:has-text("Attach link")'); await p.waitForLoadState('networkidle');
-  console.log('internal link:', await flash(p), '| staff count:', await p.locator('.gallery .att').count());
-  await p.locator('.attach input[type=checkbox]').check();
-  await p.locator('.attach input[type=file]').setInputFiles({ name: 'hubspot-settings.png', mimeType: 'image/png', buffer: png });
+  await p.fill('form.composer textarea[name=body]', 'Internal walkthrough of the fix: https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  await p.locator('form.composer input[name=internal]').check();
+  await p.click('form.composer button:has-text("Send")'); await p.waitForLoadState('networkidle');
+  console.log('internal video in message:', await flash(p), '| staff count:', await p.locator('.gallery .att').count(), '| embeds:', await p.locator('.gallery .embed iframe').count());
+  await p.locator('form.composer input[name=internal]').check();
+  await p.locator('.composer .attach input[type=file]').setInputFiles({ name: 'hubspot-settings.png', mimeType: 'image/png', buffer: png });
   await p.waitForFunction(() => document.querySelectorAll('.gallery .att').length >= 6, null, { timeout: 15000 });
   await shot(p, 'implementer-ticket-gallery');
   await p.close();
@@ -100,7 +100,7 @@ async function main(): Promise<void> {
 
   // Click paths
   p = await as(ctx, 'owner');
-  await p.goto(`${BASE}/app/dashboard`); await shot(p, 'owner-dashboard');
+  await p.goto(`${BASE}/app`); await shot(p, 'owner-home');
   await p.click('a.kpi:has-text("Open support tickets")'); await p.waitForURL('**/app/board?kind=support'); await p.locator('.board').waitFor(); await p.waitForLoadState('networkidle');
   console.log('dashboard tile -> board filtered to support:', await p.locator('.board .card').count(), 'cards');
   await shot(p, 'board-support-filter');
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 
   p = await as(ctx, 'client');
   await p.goto(`${BASE}/portal/services`);
-  await p.locator('a.sku').first().click(); await p.waitForURL('**/portal/new?sku=**'); await p.locator('form#nr').waitFor();
+  await p.locator('a.sku').first().click(); await p.waitForURL('**/portal/new/request?sku=**'); await p.locator('form#nr').waitFor();
   console.log('service card -> request form with service preselected:', await p.locator('input[name=skuId]:checked').count() === 1);
   await p.setViewportSize({ width: 390, height: 844 });
   await p.goto(reqUrl); await shot(p, 'mobile-client-gallery');

@@ -8,9 +8,10 @@ export const H = 3_600_000;
 export const DAY = 24 * H;
 export const TZ = 'America/New_York';
 
-export const LINE: Status[] = ['submitted', 'triaged', 'scoped', 'assigned', 'in_progress', 'qa', 'delivered', 'closed'];
+/** The stages people see. Triaged reads as New and Scoped as Needs an owner (see Line in components/ui). */
+export const LINE: Status[] = ['submitted', 'assigned', 'in_progress', 'qa', 'delivered', 'closed'];
 export const LBL: Record<Status, string> = {
-  submitted: 'Submitted', triaged: 'Triaged', scoped: 'Scoped', assigned: 'Assigned', in_progress: 'In progress',
+  submitted: 'New', triaged: 'New', scoped: 'Needs an owner', assigned: 'Scheduled', in_progress: 'In progress',
   waiting: 'Waiting on client', qa: 'QA review', delivered: 'Delivered', closed: 'Closed', cancelled: 'Cancelled',
 };
 /** What a client sees: fewer internal stages. */
