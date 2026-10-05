@@ -809,6 +809,8 @@ export async function setRate(db: DB, v: Viewer, profileId: string, rate: number
 export async function setPrice(db: DB, v: Viewer, orgId: string, price: number): Promise<Result> {
   mustOwner(v);
   return tx(db, async (q) => {
+    const [account] = await q.select().from(orgs).where(eq(orgs.id, orgId));
+    if (!account || account.billingModel === 'project') throw new UserError('Monthly pricing does not apply to project accounts.');
     await q.insert(orgPrices).values({ orgId, monthlyPrice: Math.max(0, price) })
       .onConflictDoUpdate({ target: orgPrices.orgId, set: { monthlyPrice: Math.max(0, price) } });
   });

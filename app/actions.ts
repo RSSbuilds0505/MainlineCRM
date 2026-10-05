@@ -339,7 +339,8 @@ export async function saveOrgAction(fd: FormData): Promise<never> {
       billingModel: s(fd, 'billingModel') || undefined, contractedHours: s(fd, 'contractedHours') === '' ? undefined : Number(s(fd, 'contractedHours')), projectRate: s(fd, 'projectRate') === '' ? undefined : Number(s(fd, 'projectRate')),
       plan: s(fd, 'plan'), monthlyCredits: n(fd, 'monthlyCredits'), credits: n(fd, 'credits'), active: s(fd, 'orgId') ? b(fd, 'active') : true,
     });
-    if (v.role === 'owner' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
+    const [account] = await db.select({ billingModel: orgs.billingModel }).from(orgs).where(eq(orgs.id, res.value));
+    if (v.role === 'owner' && account?.billingModel !== 'project' && s(fd, 'price') !== '') await wf.setPrice(db, v, res.value, n(fd, 'price'));
     return res;
   }, 'Client saved.');
 }

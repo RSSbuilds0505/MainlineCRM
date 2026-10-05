@@ -275,6 +275,7 @@ async function main(): Promise<void> {
   ok(await projectSummary(db, clientA, projectId) === null && await projectSummary(db, impB, projectId) === null, 'other client and pod cannot access project summary');
   ok(await projectSummary(db, { ...owner, active: false }, projectId) === null, 'inactive owner cannot access project summary');
   await throws(wf.resetCredits(db, lead, projectId), 'manual credit resets are blocked for projects');
+  await throws(wf.setPrice(db, owner, projectId, 500), 'project account cannot be assigned monthly subscription pricing');
   await db.update(schema.orgs).set({ creditsPeriod: '2000-01' }).where(eq(schema.orgs.id, projectId));
   await db.update(schema.settings).set({ autoReset: true, lastSweepAt: null });
   await wf.sweep(db, { force: true });
